@@ -1,16 +1,20 @@
 #ifndef DIAGBASE_H
 #define DIAGBASE_H
 
+#include <unordered_map>
+
 #include "AMReX_MultiFab.H"
 #include "AMReX_Orientation.H"
 #include "DiagFilter.H"
 #include "Factory.H"
 #include "yaml-cpp/yaml.h"
-#include <functional>
-#include <unordered_map>
 
-// Forward declaration
+// Forward declarations
 template <typename problem_t> class AMRSimulation;
+class DiagPlotfile;
+class DiagProjectionPlot;
+class DiagFramePlane;
+class DiagPDF;
 
 class DiagBase : public quokka::Factory<DiagBase>
 {
@@ -33,9 +37,8 @@ class DiagBase : public quokka::Factory<DiagBase>
 	// Type for projection data (used by DiagProjectionPlot)
 	using ProjectionData = std::unordered_map<std::string, amrex::BaseFab<amrex::Real>>;
 
-	// processDiag is implemented as a template method in derived classes
-	// Each diagnostic type implements: template<typename problem_t> void processDiag(int a_nstep, const amrex::Real &a_time, ...)
-	// This allows diagnostics to access problem-specific functionality without virtual function overhead
+	// Pure virtual processDiag - each diagnostic implements this to process diagnostic output
+	virtual void processDiag(int a_nstep, const amrex::Real &a_time) = 0;
 
 	virtual void addVars(amrex::Vector<std::string> &a_varList);
 
@@ -44,17 +47,10 @@ class DiagBase : public quokka::Factory<DiagBase>
 	static auto getFieldIndexVec(const std::vector<std::string> &a_field, const amrex::Vector<std::string> &a_varList) -> amrex::Vector<int>;
 
 	// Set diagnostic data - called by AMRSimulation::doDiagnostics()
+	// This must be implemented in simulation.hpp after all diagnostic headers are included
 	template <typename problem_t>
 	void setDiagData(AMRSimulation<problem_t> *sim, const amrex::Vector<const amrex::MultiFab *> *diagMF, const amrex::Vector<std::string> *diagVars,
-			 const amrex::Vector<amrex::Geometry> *geoms, const amrex::Vector<amrex::IntVect> *refRatio, const YAML::Node *metadata)
-	{
-		m_simulation = sim;
-		m_diagMF = diagMF;
-		m_diagVars = diagVars;
-		m_geoms = geoms;
-		m_refRatio = refRatio;
-		m_metadata = metadata;
-	}
+			 const amrex::Vector<amrex::Geometry> *geoms, const amrex::Vector<amrex::IntVect> *refRatio, const YAML::Node *metadata);
 
       protected:
 	std::string m_diagfile;

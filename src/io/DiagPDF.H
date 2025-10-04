@@ -1,6 +1,8 @@
 #ifndef DIAGPDF_H
 #define DIAGPDF_H
 
+#include <functional>
+
 #include "AMReX_GpuContainers.H"
 #include "AMReX_MultiFabUtil.H"
 #include "DiagBase.H"
@@ -15,8 +17,26 @@ class DiagPDF : public DiagBase::Register<DiagPDF>
 	void prepare(int a_nlevels, const amrex::Vector<amrex::Geometry> &a_geoms, const amrex::Vector<amrex::BoxArray> &a_grids,
 		     const amrex::Vector<amrex::DistributionMapping> &a_dmap, const amrex::Vector<std::string> &a_varNames) override;
 
-	// Template implementation - called from AMRSimulation::doDiagnostics()
-	template <typename problem_t> void processDiag(int a_nstep, const amrex::Real &a_time);
+	// Virtual override - bridges to template implementation
+	void processDiag(int a_nstep, const amrex::Real &a_time) override
+	{
+		if (m_processDiagCallback) {
+			m_processDiagCallback(a_nstep, a_time);
+		} else {
+			amrex::Abort("DiagPDF::processDiag called before problem_t was set");
+		}
+	}
+
+	// Template implementation - called via callback set during setDiagData
+	template <typename problem_t> void processDiagImpl(int a_nstep, const amrex::Real &a_time);
+
+	// Set up the callback for the specific problem_t
+	template <typename problem_t> void setProblemType()
+	{
+		m_processDiagCallback = [this](int nstep, const amrex::Real &time) {
+			this->processDiagImpl<problem_t>(nstep, time);
+		};
+	}
 
 	void addVars(amrex::Vector<std::string> &a_varList) override;
 
@@ -28,17 +48,19 @@ class DiagPDF : public DiagBase::Register<DiagPDF>
 
       private:
 	// PDF properties
-	std::string m_weightType{"volume"};    // Weighting types: "volume", "mass", "cell_counts"
-	std::vector<std::string> m_varNames{}; // Variable names
-	std::vector<int> m_nBins{};	       // Number of bins
-	std::vector<int> m_useLogSpacedBins{}; // Use log-spaced bins
-	std::vector<bool> m_useFieldMinMax{};  // Use min/max from field
-	std::vector<amrex::Real> m_lowBnd{};   // User-defined low bound
-	std::vector<amrex::Real> m_highBnd{};  // User-defined high bound
+	std::string m_weightType{"volume"};   // Weighting types: "volume", "mass", "cell_counts"
+	std::vector<std::string> m_varNames;  // Variable names
+	std::vector<int> m_nBins;	      // Number of bins
+	std::vector<int> m_useLogSpacedBins;  // Use log-spaced bins
+	std::vector<bool> m_useFieldMinMax;   // Use min/max from field
+	std::vector<amrex::Real> m_lowBnd;    // User-defined low bound
+	std::vector<amrex::Real> m_highBnd;   // User-defined high bound
 
 	// Geometrical data
 	amrex::Vector<amrex::Geometry> m_geoms; // Squirrel away the geoms
 	amrex::Vector<amrex::IntVect> m_refRatio;
+
+	std::function<void(int, const amrex::Real &)> m_processDiagCallback; // Callback to template implementation
 
 	// helper functions
 	static auto getIdxVec(int linidx, std::vector<int> const &nBins) -> std::vector<int>;
@@ -68,7 +90,7 @@ AMREX_GPU_HOST_DEVICE AMREX_INLINE auto DiagPDF::getTotalBinCount() -> amrex::Lo
 }
 
 // Template implementation
-template <typename problem_t> void DiagPDF::processDiag(int a_nstep, const amrex::Real &a_time)
+template <typename problem_t> void DiagPDF::processDiagImpl(int a_nstep, const amrex::Real &a_time)
 {
 	BL_PROFILE("DiagPDF::processDiag()");
 

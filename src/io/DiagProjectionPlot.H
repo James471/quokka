@@ -1,6 +1,7 @@
 #ifndef DIAGPROJECTIONPLOT_H
 #define DIAGPROJECTIONPLOT_H
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,8 +33,26 @@ class DiagProjectionPlot : public DiagBase::Register<DiagProjectionPlot>
 
 	void close() override {}
 
-	// Template implementation - called from AMRSimulation::doDiagnostics()
-	template <typename problem_t> void processDiag(int a_nstep, const amrex::Real &a_time);
+	// Virtual override - bridges to template implementation
+	void processDiag(int a_nstep, const amrex::Real &a_time) override
+	{
+		if (m_processDiagCallback) {
+			m_processDiagCallback(a_nstep, a_time);
+		} else {
+			amrex::Abort("DiagProjectionPlot::processDiag called before problem_t was set");
+		}
+	}
+
+	// Template implementation - called via callback set during setDiagData
+	template <typename problem_t> void processDiagImpl(int a_nstep, const amrex::Real &a_time);
+
+	// Set up the callback for the specific problem_t
+	template <typename problem_t> void setProblemType()
+	{
+		m_processDiagCallback = [this](int nstep, const amrex::Real &time) {
+			this->processDiagImpl<problem_t>(nstep, time);
+		};
+	}
 
 	// Get the list of particle types to include (empty means none)
 	[[nodiscard]] auto getParticleTypes() const -> const std::vector<std::string> & { return m_particleTypes; }
@@ -41,10 +60,11 @@ class DiagProjectionPlot : public DiagBase::Register<DiagProjectionPlot>
       private:
 	std::vector<std::string> m_particleTypes;	// List of particle types to include (default: empty)
 	std::vector<amrex::Direction> m_projectionDirs; // Projection directions (x, y, z)
+	std::function<void(int, const amrex::Real &)> m_processDiagCallback; // Callback to template implementation
 };
 
 // Template implementation
-template <typename problem_t> void DiagProjectionPlot::processDiag(int a_nstep, const amrex::Real &a_time)
+template <typename problem_t> void DiagProjectionPlot::processDiagImpl(int a_nstep, const amrex::Real &a_time)
 {
 	BL_PROFILE("DiagProjectionPlot::processDiag()");
 

@@ -13,6 +13,7 @@
 #include "io/io_utils.hpp"
 #include "particles/PhysicsParticles.hpp"
 #include <fstream>
+#include <functional>
 
 #ifdef QUOKKA_USE_OPENPMD
 #include "io/openPMD.hpp"
@@ -39,8 +40,26 @@ class DiagPlotfile : public DiagBase::Register<DiagPlotfile>
 
 	void close() override {}
 
-	// Template implementation - called from AMRSimulation::doDiagnostics()
-	template <typename problem_t> void processDiag(int a_nstep, const amrex::Real &a_time);
+	// Virtual override - bridges to template implementation
+	void processDiag(int a_nstep, const amrex::Real &a_time) override
+	{
+		if (m_processDiagCallback) {
+			m_processDiagCallback(a_nstep, a_time);
+		} else {
+			amrex::Abort("DiagPlotfile::processDiag called before problem_t was set");
+		}
+	}
+
+	// Template implementation - called via callback set during setDiagData
+	template <typename problem_t> void processDiagImpl(int a_nstep, const amrex::Real &a_time);
+
+	// Set up the callback for the specific problem_t
+	template <typename problem_t> void setProblemType()
+	{
+		m_processDiagCallback = [this](int nstep, const amrex::Real &time) {
+			this->processDiagImpl<problem_t>(nstep, time);
+		};
+	}
 
 	// Get the diagnostic file name
 	[[nodiscard]] auto getDiagFileName() const -> const std::string & { return m_diagfile; }
@@ -51,13 +70,14 @@ class DiagPlotfile : public DiagBase::Register<DiagPlotfile>
       private:
 	std::vector<std::string> m_particleTypes; // List of particle types to include (empty means all)
 	int m_nfiles{-1};			  // Number of files for output (-1 means default)
+	std::function<void(int, const amrex::Real &)> m_processDiagCallback; // Callback to template implementation
 
 	// Helper function to write metadata file
 	static void WriteMetadataFile(const std::string &metadataFilename, const YAML::Node &simulationMetadata);
 };
 
 // Template implementation - processes diagnostic with full access to simulation
-template <typename problem_t> void DiagPlotfile::processDiag(int a_nstep, const amrex::Real &a_time)
+template <typename problem_t> void DiagPlotfile::processDiagImpl(int a_nstep, const amrex::Real &a_time)
 {
 	const BL_PROFILE("DiagPlotfile::processDiag()");
 

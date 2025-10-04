@@ -112,6 +112,33 @@ using namespace ascent;
 // Quokka version string to be stored in metadata. This is used in post-processing tools like YT to do version checks.
 static constexpr auto QUOKKA_VERSION = "25.03";
 
+// Implementation of DiagBase::setDiagData (needs full diagnostic class definitions)
+template <typename problem_t>
+inline void DiagBase::setDiagData(AMRSimulation<problem_t> *sim, const amrex::Vector<const amrex::MultiFab *> *diagMF,
+				  const amrex::Vector<std::string> *diagVars, const amrex::Vector<amrex::Geometry> *geoms,
+				  const amrex::Vector<amrex::IntVect> *refRatio, const YAML::Node *metadata)
+{
+	m_simulation = sim;
+	m_diagMF = diagMF;
+	m_diagVars = diagVars;
+	m_geoms = geoms;
+	m_refRatio = refRatio;
+	m_metadata = metadata;
+
+	// Set up the callback for this diagnostic's specific problem_t
+	if (auto *diag = dynamic_cast<DiagPlotfile *>(this)) {
+		diag->setProblemType<problem_t>();
+	} else if (auto *diag = dynamic_cast<DiagProjectionPlot *>(this)) {
+		diag->setProblemType<problem_t>();
+	} else if (auto *diag = dynamic_cast<DiagFramePlane *>(this)) {
+		diag->setProblemType<problem_t>();
+	} else if (auto *diag = dynamic_cast<DiagPDF *>(this)) {
+		diag->setProblemType<problem_t>();
+	} else {
+		amrex::Abort("Unknown diagnostic type in DiagBase::setDiagData");
+	}
+}
+
 template <> struct fmt::formatter<amrex::IntVect> : formatter<std::vector<int>> {
 	// parse is inherited from formatter<std::vector<int>>.
 	auto format(amrex::IntVect iv, format_context &ctx) const -> format_context::iterator
@@ -2964,34 +2991,8 @@ template <typename problem_t> void AMRSimulation<problem_t>::doDiagnostics()
 			// Set common diagnostic data (including simulation pointer)
 			diag->setDiagData(this, &diagMFVec_ptr, &m_diagVars, &geoms, &ref_ratio, &simulationMetadata_);
 
-			// Call the appropriate template processDiag for each diagnostic type
-			// All diagnostics now have a unified API: processDiag<problem_t>(nstep, time)
-			auto *plotfileDiag = dynamic_cast<DiagPlotfile *>(diag.get());
-			if (plotfileDiag != nullptr) {
-				plotfileDiag->processDiag<problem_t>(istep[0], tNew_[0]);
-				continue;
-			}
-
-			auto *projectionDiag = dynamic_cast<DiagProjectionPlot *>(diag.get());
-			if (projectionDiag != nullptr) {
-				projectionDiag->processDiag<problem_t>(istep[0], tNew_[0]);
-				continue;
-			}
-
-			auto *framePlaneDiag = dynamic_cast<DiagFramePlane *>(diag.get());
-			if (framePlaneDiag != nullptr) {
-				framePlaneDiag->processDiag<problem_t>(istep[0], tNew_[0]);
-				continue;
-			}
-
-			auto *pdfDiag = dynamic_cast<DiagPDF *>(diag.get());
-			if (pdfDiag != nullptr) {
-				pdfDiag->processDiag<problem_t>(istep[0], tNew_[0]);
-				continue;
-			}
-
-			// Unknown diagnostic type
-			amrex::Abort("Unknown diagnostic type - all diagnostic types must implement template processDiag");
+			// Call processDiag through virtual interface
+			diag->processDiag(istep[0], tNew_[0]);
 		}
 	}
 }

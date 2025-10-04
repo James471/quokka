@@ -1,6 +1,8 @@
 #ifndef DIAGFRAMEPLANE_H
 #define DIAGFRAMEPLANE_H
 
+#include <functional>
+
 #include "AMReX_PlotFileUtil.H"
 #include "AMReX_VisMF.H"
 #include "DiagBase.H"
@@ -17,8 +19,26 @@ class DiagFramePlane : public DiagBase::Register<DiagFramePlane>
 	void prepare(int a_nlevels, const amrex::Vector<amrex::Geometry> &a_geoms, const amrex::Vector<amrex::BoxArray> &a_grids,
 		     const amrex::Vector<amrex::DistributionMapping> &a_dmap, const amrex::Vector<std::string> &a_varNames) override;
 
-	// Template implementation - called from AMRSimulation::doDiagnostics()
-	template <typename problem_t> void processDiag(int a_nstep, const amrex::Real &a_time);
+	// Virtual override - bridges to template implementation
+	void processDiag(int a_nstep, const amrex::Real &a_time) override
+	{
+		if (m_processDiagCallback) {
+			m_processDiagCallback(a_nstep, a_time);
+		} else {
+			amrex::Abort("DiagFramePlane::processDiag called before problem_t was set");
+		}
+	}
+
+	// Template implementation - called via callback set during setDiagData
+	template <typename problem_t> void processDiagImpl(int a_nstep, const amrex::Real &a_time);
+
+	// Set up the callback for the specific problem_t
+	template <typename problem_t> void setProblemType()
+	{
+		m_processDiagCallback = [this](int nstep, const amrex::Real &time) {
+			this->processDiagImpl<problem_t>(nstep, time);
+		};
+	}
 
 	void addVars(amrex::Vector<std::string> &a_varList) override;
 
@@ -62,10 +82,12 @@ class DiagFramePlane : public DiagBase::Register<DiagFramePlane>
 	amrex::Vector<amrex::BoxArray> m_sliceBA;
 	amrex::Vector<amrex::Vector<int>> m_dmConvert;
 	amrex::Vector<amrex::DistributionMapping> m_sliceDM;
+	
+	std::function<void(int, const amrex::Real &)> m_processDiagCallback; // Callback to template implementation
 };
 
 // Template implementation
-template <typename problem_t> void DiagFramePlane::processDiag(int a_nstep, const amrex::Real &a_time)
+template <typename problem_t> void DiagFramePlane::processDiagImpl(int a_nstep, const amrex::Real &a_time)
 {
 	BL_PROFILE("DiagFramePlane::processDiag()");
 
