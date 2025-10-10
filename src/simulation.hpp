@@ -365,7 +365,6 @@ template <typename problem_t> class AMRSimulation : public amrex::AmrCore
 	// ABOUTME: Used to handle universal refinement during checkpoint restart operations
 	struct RefinementContext {
 		int refinement_factor = 1;
-		amrex::Geometry coarse_level0_geom;
 		[[nodiscard]] auto needs_refinement() const -> bool { return refinement_factor > 1; }
 	};
 
@@ -381,6 +380,7 @@ template <typename problem_t> class AMRSimulation : public amrex::AmrCore
 							const RefinementContext &context, const amrex::Geometry &coarse_geom,
 							const amrex::Geometry &fine_geom);
 	void loadMultiFabData(const RefinementContext &context);
+	[[nodiscard]] auto buildRestartSourceGeometry(int lev, const RefinementContext &context) const -> amrex::Geometry;
 	auto loadBalanceOnRestart(const amrex::BoxArray &input_ba, int lev) -> amrex::BoxArray;
 
 	template <typename ParticleContainer>
@@ -3434,6 +3434,19 @@ template <typename problem_t> void AMRSimulation<problem_t>::WriteCheckpointFile
 	// set the maximum number of binary files per MultiFab
 	quokka::ScopedVisMFNOutFiles scoped_nfiles(checkpoint_nfiles);
 
+	// ensure ghost cells are up to date before writing data to disk
+	auto *self = const_cast<AMRSimulation<problem_t> *>(this);
+	for (int lev = 0; lev <= finest_level; ++lev) {
+		self->fillBoundaryConditions(self->state_new_cc_[lev], self->state_new_cc_[lev], lev, tNew_[lev], quokka::centering::cc, quokka::direction::na,
+					     InterpHookNone, InterpHookNone, FillPatchType::fillpatch_function);
+		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+				self->fillBoundaryConditions(self->state_new_fc_[lev][idim], self->state_new_fc_[lev][idim], lev, tNew_[lev], quokka::centering::fc,
+							     static_cast<quokka::direction>(idim), InterpHookNone, InterpHookNone, FillPatchType::fillpatch_function);
+			}
+		}
+	}
+
 	// write the cell-centred MultiFab data to, e.g., chk00010/Level_0/
 	for (int lev = 0; lev <= finest_level; ++lev) {
 		amrex::VisMF::Write(state_new_cc_[lev], amrex::MultiFabFileFullPrefix(lev, checkpointname, "Level_", "Cell"));
@@ -3499,9 +3512,6 @@ auto AMRSimulation<problem_t>::detectRefinementContext(const amrex::BoxArray &re
 		}
 		// set refinement factor and create coarse level 0 geometry
 		context.refinement_factor = rescaleFac;
-		amrex::IntVect is_per = current_geom.periodicity().intVect();
-		const amrex::Array<int, AMREX_SPACEDIM> is_per_arr{AMREX_D_DECL(is_per[0], is_per[1], is_per[2])};
-		context.coarse_level0_geom = amrex::Geometry(reDom, current_geom.ProbDomain(), amrex::CoordSys::cartesian, is_per_arr);
 	}
 
 	return context;
@@ -3575,7 +3585,10 @@ void AMRSimulation<problem_t>::interpolateMultiFabFromRestart(amrex::MultiFab &t
 {
 	if (!context.needs_refinement()) {
 		// if not refining, ParallelCopy
-		target.ParallelCopy(source, 0, 0, source.nComp(), target.nGrowVect(), source.nGrowVect());
+		const amrex::IntVect source_grow = source.nGrowVect();
+		const amrex::IntVect target_grow = target.nGrowVect();
+		const amrex::IntVect copy_grow = amrex::min(source_grow, target_grow);
+		target.ParallelCopy(source, 0, 0, source.nComp(), source_grow, copy_grow);
 	} else {
 		// if refining, InterpFromCoarseLevel
 		amrex::IntVect restart_ref_ratio{AMREX_D_DECL(context.refinement_factor, context.refinement_factor, context.refinement_factor)};
@@ -3607,7 +3620,11 @@ void AMRSimulation<problem_t>::interpolateFaceCenteredMultiFabFromRestart(
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			AMREX_ASSERT(targets[idim] != nullptr);
 			AMREX_ASSERT(sources[idim] != nullptr);
-			targets[idim]->ParallelCopy(*sources[idim], 0, 0, ncomp_per_dim_fc, sources[idim]->nGrowVect(), targets[idim]->nGrowVect());
+			const amrex::IntVect source_grow = sources[idim]->nGrowVect();
+			const amrex::IntVect target_grow = targets[idim]->nGrowVect();
+			const amrex::IntVect copy_grow = amrex::min(source_grow, target_grow);
+			const int ncomp = sources[idim]->nComp();
+			targets[idim]->ParallelCopy(*sources[idim], 0, 0, ncomp, source_grow, copy_grow);
 		}
 		return;
 	}
@@ -3635,17 +3652,32 @@ void AMRSimulation<problem_t>::interpolateFaceCenteredMultiFabFromRestart(
 				     restart_ref_ratio, &amrex::face_divfree_interp, BCs_array, 0);
 }
 
+template <typename problem_t>
+auto AMRSimulation<problem_t>::buildRestartSourceGeometry(const int lev, const RefinementContext &context) const -> amrex::Geometry
+{
+	if (!context.needs_refinement()) {
+		return geom[lev];
+	}
+
+	AMREX_ALWAYS_ASSERT(lev < static_cast<int>(geom.size()));
+	AMREX_ALWAYS_ASSERT(context.refinement_factor > 0);
+	const amrex::Box &fine_domain = geom[lev].Domain();
+	AMREX_ALWAYS_ASSERT(fine_domain.coarsenable(context.refinement_factor));
+	amrex::Box coarse_domain = amrex::coarsen(fine_domain, context.refinement_factor);
+	const amrex::RealBox &prob_domain = geom[lev].ProbDomain();
+	const auto coord = geom[lev].Coord();
+	amrex::IntVect const is_per = geom[lev].periodicity().intVect();
+	const amrex::Array<int, AMREX_SPACEDIM> is_per_arr{AMREX_D_DECL(is_per[0], is_per[1], is_per[2])};
+	return amrex::Geometry(coarse_domain, prob_domain, coord, is_per_arr);
+}
+
 template <typename problem_t> void AMRSimulation<problem_t>::loadMultiFabData(const RefinementContext &context)
 {
 	for (int lev = 0; lev <= finest_level; ++lev) {
-		amrex::Geometry coarse_geom;
-		if (lev == 0) {
-			coarse_geom = context.coarse_level0_geom;
-		} else {
-			coarse_geom = geom[lev - 1];
-		}
+		const amrex::Geometry coarse_geom = buildRestartSourceGeometry(lev, context);
 
 		// cell-centred data
+		state_new_cc_[lev].setVal(0.0);
 		amrex::MultiFab tmp;
 		amrex::VisMF::Read(tmp, amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Cell"));
 		interpolateMultiFabFromRestart(state_new_cc_[lev], tmp, context, coarse_geom, geom[lev], BCs_cc_);
@@ -3661,6 +3693,10 @@ template <typename problem_t> void AMRSimulation<problem_t>::loadMultiFabData(co
 				tmp_fc[idim] = std::make_unique<amrex::MultiFab>();
 				amrex::VisMF::Read(
 				    *tmp_fc[idim], amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", std::string("Face_") + quokka::face_dir_str[idim]));
+				tmp_fc[idim]->setBndry(0.0, 0, tmp_fc[idim]->nComp());
+				tmp_fc[idim]->FillBoundary(coarse_geom.periodicity());
+				AMREX_ALWAYS_ASSERT(!tmp_fc[idim]->contains_nan(0, tmp_fc[idim]->nComp()));
+				state_new_fc_[lev][idim].setVal(0.0);
 				coarse_face_ptrs[idim] = tmp_fc[idim].get();
 				fine_face_ptrs[idim] = &state_new_fc_[lev][idim];
 			}
