@@ -3607,7 +3607,7 @@ void AMRSimulation<problem_t>::interpolateFaceCenteredMultiFabFromRestart(
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			AMREX_ASSERT(targets[idim] != nullptr);
 			AMREX_ASSERT(sources[idim] != nullptr);
-			targets[idim]->ParallelCopy(*sources[idim], 0, 0, ncomp_per_dim_fc, targets[idim]->nGrowVect(), sources[idim]->nGrowVect());
+			targets[idim]->ParallelCopy(*sources[idim], 0, 0, ncomp_per_dim_fc, sources[idim]->nGrowVect(), targets[idim]->nGrowVect());
 		}
 		return;
 	}
