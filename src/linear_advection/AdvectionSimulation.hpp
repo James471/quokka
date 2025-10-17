@@ -308,6 +308,13 @@ template <typename problem_t> void AdvectionSimulation<problem_t>::advanceSingle
 	// get geometry (used only for cell sizes)
 	auto const &geomLevel = geom[lev];
 
+	const int ncomp = state_old_cc_[lev].nComp();
+
+	// create ghosted working copies for cell-centred states
+	amrex::MultiFab state_old_tmp(grids[lev], dmap[lev], ncomp, nghost_cc_);
+	amrex::MultiFab state_stage_tmp(grids[lev], dmap[lev], ncomp, nghost_cc_);
+	amrex::MultiFab::Copy(state_old_tmp, state_old_cc_[lev], 0, 0, ncomp, 0);
+
 	// get flux registers
 	amrex::FluxRegister *fr_as_crse = nullptr;
 	amrex::FluxRegister *fr_as_fine = nullptr;
@@ -338,7 +345,7 @@ template <typename problem_t> void AdvectionSimulation<problem_t>::advanceSingle
 
 	// update ghost zones [w/ old timestep]
 	// (N.B. the input and output multifabs are allowed to be the same, as done here)
-	fillBoundaryConditions(state_old_cc_[lev], state_old_cc_[lev], lev, time, quokka::centering::cc, quokka::direction::na,
+	fillBoundaryConditions(state_old_tmp, state_old_tmp, lev, time, quokka::centering::cc, quokka::direction::na,
 			       AMRSimulation<problem_t>::InterpHookNone, AMRSimulation<problem_t>::InterpHookNone);
 
 	amrex::Real fluxScaleFactor = NAN;
@@ -350,8 +357,8 @@ template <typename problem_t> void AdvectionSimulation<problem_t>::advanceSingle
 
 	// advance all grids on local processor (Stage 1 of integrator)
 	{
-		auto const &stateOld = state_old_cc_[lev];
-		auto &stateNew = state_new_cc_[lev];
+		auto const &stateOld = state_old_tmp;
+		auto &stateNew = state_stage_tmp;
 		auto [fluxArrays, faceVelArrays, leftStateArrays, rightStateArrays] = computeFluxes(stateOld, Physics_Indices<problem_t>::nvarTotal_cc, lev);
 
 		// Write face velocities to disk
@@ -372,15 +379,15 @@ template <typename problem_t> void AdvectionSimulation<problem_t>::advanceSingle
 	}
 
 	if constexpr (integratorOrder_ == 2) {
-		// update ghost zones [w/ intermediate stage stored in state_new_cc_]
-		fillBoundaryConditions(state_new_cc_[lev], state_new_cc_[lev], lev, (time + dt_lev), quokka::centering::cc, quokka::direction::na,
+		// update ghost zones [w/ intermediate stage stored in state_stage_tmp]
+		fillBoundaryConditions(state_stage_tmp, state_stage_tmp, lev, (time + dt_lev), quokka::centering::cc, quokka::direction::na,
 				       AMRSimulation<problem_t>::InterpHookNone, AMRSimulation<problem_t>::InterpHookNone);
 
 		// advance all grids on local processor (Stage 2 of integrator)
 		{
-			auto const &stateInOld = state_old_cc_[lev];
-			auto const &stateInStar = state_new_cc_[lev];
-			auto &stateOut = state_new_cc_[lev];
+			auto const &stateInOld = state_old_tmp;
+			auto const &stateInStar = state_stage_tmp;
+			auto &stateOut = state_stage_tmp;
 			auto [fluxArrays, faceVelArrays, leftStateArrays, rightStateArrays] =
 			    computeFluxes(stateInStar, Physics_Indices<problem_t>::nvarTotal_cc, lev);
 
@@ -395,6 +402,8 @@ template <typename problem_t> void AdvectionSimulation<problem_t>::advanceSingle
 			}
 		}
 	}
+
+	amrex::MultiFab::Copy(state_new_cc_[lev], state_stage_tmp, 0, 0, ncomp, 0);
 
 	if (do_reflux) {
 		incrementFluxRegisters(fr_as_crse, fr_as_fine, fluxes, lev, fluxScaleFactor * dt_lev);
