@@ -1138,6 +1138,9 @@ template <typename problem_t> void QuokkaSimulation<problem_t>::PreInterpState(a
 	auto const &cons = mf.arrays();
 	amrex::ParallelFor(mf, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
 		const auto rho = cons[bx](i, j, k, HydroSystem<problem_t>::density_index);
+		if (rho <= 0.) {
+			return;
+		}
 		const auto px = cons[bx](i, j, k, HydroSystem<problem_t>::x1Momentum_index);
 		const auto py = cons[bx](i, j, k, HydroSystem<problem_t>::x2Momentum_index);
 		const auto pz = cons[bx](i, j, k, HydroSystem<problem_t>::x3Momentum_index);
@@ -1157,6 +1160,9 @@ template <typename problem_t> void QuokkaSimulation<problem_t>::PostInterpState(
 	auto const &cons = mf.arrays();
 	amrex::ParallelFor(mf, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
 		const auto rho = cons[bx](i, j, k, HydroSystem<problem_t>::density_index);
+		if (rho <= 0.) {
+			return;
+		}
 		const auto px = cons[bx](i, j, k, HydroSystem<problem_t>::x1Momentum_index);
 		const auto py = cons[bx](i, j, k, HydroSystem<problem_t>::x2Momentum_index);
 		const auto pz = cons[bx](i, j, k, HydroSystem<problem_t>::x3Momentum_index);
@@ -2412,6 +2418,8 @@ void QuokkaSimulation<problem_t>::advanceRadiationForwardEuler(int lev, amrex::R
 	fillBoundaryConditions(state_old_tmp, state_old_tmp, lev, time, quokka::centering::cc, quokka::direction::na, PreInterpState, PostInterpState);
 
 	amrex::MultiFab state_new_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_new_tmp, state_old_tmp, 0, 0, ncomp_cc, 0);
+	fillBoundaryConditions(state_new_tmp, state_new_tmp, lev, time, quokka::centering::cc, quokka::direction::na, PreInterpState, PostInterpState);
 
 	// advance all grids on local processor (Stage 1 of integrator)
 	for (amrex::MFIter iter(state_new_tmp); iter.isValid(); ++iter) {
@@ -2472,6 +2480,9 @@ void QuokkaSimulation<problem_t>::advanceRadiationMidpointRK2(int lev, amrex::Re
 			       PostInterpState);
 
 	amrex::MultiFab state_new_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_new_tmp, state_inter_tmp, 0, 0, ncomp_cc, 0);
+	fillBoundaryConditions(state_new_tmp, state_new_tmp, lev, (time + dt_radiation), quokka::centering::cc, quokka::direction::na, PreInterpState,
+			       PostInterpState);
 
 	// advance all grids on local processor (Stage 2 of integrator)
 	for (amrex::MFIter iter(state_new_tmp); iter.isValid(); ++iter) {
