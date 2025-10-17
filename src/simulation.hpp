@@ -1771,10 +1771,10 @@ template <typename problem_t> void AMRSimulation<problem_t>::particleMeshInterac
 	// Assume all SN progenitors are at the finest level
 	const int lev = finest_level;
 
-	// Fill boundary before computing accretion rate. This is necessary because the computation of accretion rate uses 3 ghost cells, but the
-	// boundaries are not filled at this point.
-	// TODO(cch): fill the hydro variables but not radiation variables, since radiation variables are used in accretion
-	state_new_cc_[lev].FillBoundary(geom[lev].periodicity());
+	// Build a ghosted view of the state for particle routines that need a halo
+	amrex::MultiFab state_cc_with_ghosts(grids[lev], dmap[lev], state_new_cc_[lev].nComp(), nghost);
+	amrex::MultiFab::Copy(state_cc_with_ghosts, state_new_cc_[lev], 0, 0, state_new_cc_[lev].nComp(), 0);
+	state_cc_with_ghosts.FillBoundary(geom[lev].periodicity());
 
 	// Create a MultiFab to hold the change of states (density, 3 x momentum, internal energy, energy) during particle-mesh interaction
 	// The extra component is for the particle counts in cells
@@ -1783,20 +1783,23 @@ template <typename problem_t> void AMRSimulation<problem_t>::particleMeshInterac
 	accretion_rate_at_level.setVal(0.0);
 
 	// Sink accretion, stage 1: compute the accretion rate
-	particleRegister_.computeSinkAccretion(state_new_cc_[lev], accretion_rate_at_level, lev, time, dt);
+	particleRegister_.computeSinkAccretion(state_cc_with_ghosts, accretion_rate_at_level, lev, time, dt);
 
 	// Apply roundoff to accretion_rate_at_level
 	// TODO(cch): compute accumulative errors and pass it to roundoffMultiFab
 	quokka::ParticleUtils::roundoffMultiFab(accretion_rate_at_level);
 
 	// Sink accretion, stage 2: update the particle states -- compute scale_down, apply to particle, apply to cells
-	particleRegister_.applySinkAccretion(state_new_cc_[lev], accretion_rate_at_level, geom[lev], lev, time, dt);
+	particleRegister_.applySinkAccretion(state_cc_with_ghosts, accretion_rate_at_level, geom[lev], lev, time, dt);
 
 	// We allow particle formation at the finest level only to avoid duplicate particle creation from multiple levels at the same location.
-	particleRegister_.createParticlesFromState(state_new_cc_[lev], accretion_rate_at_level, lev, time, dt);
+	particleRegister_.createParticlesFromState(state_cc_with_ghosts, accretion_rate_at_level, lev, time, dt);
 
 	// Deposit the SN particles into the MultiFab
-	const amrex::Real max_velocity = particleRegister_.depositSN(state_new_cc_[lev], lev, time, dt);
+	const amrex::Real max_velocity = particleRegister_.depositSN(state_cc_with_ghosts, lev, time, dt);
+
+	// Sync updated cell-centered state back to the persistent storage
+	amrex::MultiFab::Copy(state_new_cc_[lev], state_cc_with_ghosts, 0, 0, state_new_cc_[lev].nComp(), 0);
 
 	// Check if the maximum velocity is greater than the threshold
 	constexpr amrex::Real v_over_c_threshold = 0.03;
