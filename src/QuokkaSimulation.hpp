@@ -1271,7 +1271,6 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 		}
 
 		amrex::MultiFab state_old_cc_tmp(grids[lev], dmap[lev], Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
-		state_old_cc_tmp.setVal(0.0);
 		amrex::MultiFab::Copy(state_old_cc_tmp, accepted_state_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 
 		std::array<amrex::MultiFab, AMREX_SPACEDIM> state_old_fc_tmp;
@@ -1287,7 +1286,6 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 
 		for (int substep_index = start_substep; substep_index < total_substeps; ++substep_index) {
 			if (substep_index > start_substep) {
-				state_old_cc_tmp.setVal(0.0);
 				amrex::MultiFab::Copy(state_old_cc_tmp, state_new_cc_[lev], 0, 0, ncompHydro_, 0);
 				if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 					for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -2394,6 +2392,7 @@ void QuokkaSimulation<problem_t>::advanceRadiationForwardEuler(int lev, amrex::R
 {
 	// get cell sizes
 	auto const &dx = geom[lev].CellSizeArray();
+	const int ncomp_cc = state_new_cc_[lev].nComp();
 
 	std::array<amrex::MultiFab, AMREX_SPACEDIM> refluxFluxes;
 	if (do_reflux) {
@@ -2401,22 +2400,24 @@ void QuokkaSimulation<problem_t>::advanceRadiationForwardEuler(int lev, amrex::R
 			for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
 				amrex::BoxArray ba = state_new_cc_[lev].boxArray();
 				ba.surroundingNodes(dir);
-				fluxes[dir].define(ba, dmap[lev], state_new_cc_[lev].nComp(), 0);
+				fluxes[dir].define(ba, dmap[lev], ncomp_cc, 0);
 				fluxes[dir].setVal(0.0);
 			}
 		};
 		initRefluxFluxes(refluxFluxes);
 	}
 
-	// update ghost zones [old timestep]
-	fillBoundaryConditions(state_old_cc_[lev], state_old_cc_[lev], lev, time, quokka::centering::cc, quokka::direction::na, PreInterpState,
-			       PostInterpState);
+	amrex::MultiFab state_old_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_old_tmp, state_old_cc_[lev], 0, 0, ncomp_cc, 0);
+	fillBoundaryConditions(state_old_tmp, state_old_tmp, lev, time, quokka::centering::cc, quokka::direction::na, PreInterpState, PostInterpState);
+
+	amrex::MultiFab state_new_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
 
 	// advance all grids on local processor (Stage 1 of integrator)
-	for (amrex::MFIter iter(state_new_cc_[lev]); iter.isValid(); ++iter) {
+	for (amrex::MFIter iter(state_new_tmp); iter.isValid(); ++iter) {
 		const amrex::Box &indexRange = iter.validbox();
-		auto const &stateOld_cc = state_old_cc_[lev].const_array(iter);
-		auto const &stateNew_cc = state_new_cc_[lev].array(iter);
+		auto const &stateOld_cc = state_old_tmp.const_array(iter);
+		auto const &stateNew_cc = state_new_tmp.array(iter);
 		auto [fluxArrays, fluxDiffusiveArrays] = computeRadiationFluxes(stateOld_cc, indexRange, ncompHyperbolic_, dx);
 
 		// Stage 1 of RK2-SSP
@@ -2426,7 +2427,7 @@ void QuokkaSimulation<problem_t>::advanceRadiationForwardEuler(int lev, amrex::R
 		    dt_radiation, dx, indexRange, ncompHyperbolic_);
 
 		if (do_reflux) {
-			auto expandedFluxes = expandFluxArrays(fluxArrays, nstartHyperbolic_, state_new_cc_[lev].nComp());
+			auto expandedFluxes = expandFluxArrays(fluxArrays, nstartHyperbolic_, ncomp_cc);
 			for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
 				refluxFluxes[dir][iter].copy<amrex::RunOn::Device>(expandedFluxes[dir], expandedFluxes[dir].box(), 0, expandedFluxes[dir].box(),
 										   0, refluxFluxes[dir].nComp());
@@ -2437,6 +2438,8 @@ void QuokkaSimulation<problem_t>::advanceRadiationForwardEuler(int lev, amrex::R
 	if (do_reflux) {
 		incrementFluxRegisters(fr_as_crse, fr_as_fine, refluxFluxes, lev, 0.5 * dt_radiation);
 	}
+
+	amrex::MultiFab::Copy(state_new_cc_[lev], state_new_tmp, 0, 0, ncomp_cc, 0);
 }
 
 template <typename problem_t>
@@ -2444,6 +2447,7 @@ void QuokkaSimulation<problem_t>::advanceRadiationMidpointRK2(int lev, amrex::Re
 							      int const /*nsubsteps*/, amrex::FluxRegister *fr_as_crse, amrex::FluxRegister *fr_as_fine)
 {
 	auto const &dx = geom[lev].CellSizeArray();
+	const int ncomp_cc = state_new_cc_[lev].nComp();
 
 	std::array<amrex::MultiFab, AMREX_SPACEDIM> refluxFluxes;
 	if (do_reflux) {
@@ -2451,23 +2455,30 @@ void QuokkaSimulation<problem_t>::advanceRadiationMidpointRK2(int lev, amrex::Re
 			for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
 				amrex::BoxArray ba = state_new_cc_[lev].boxArray();
 				ba.surroundingNodes(dir);
-				fluxes[dir].define(ba, dmap[lev], state_new_cc_[lev].nComp(), 0);
+				fluxes[dir].define(ba, dmap[lev], ncomp_cc, 0);
 				fluxes[dir].setVal(0.0);
 			}
 		};
 		initRefluxFluxes(refluxFluxes);
 	}
 
-	// update ghost zones [intermediate stage stored in state_new_cc_]
-	fillBoundaryConditions(state_new_cc_[lev], state_new_cc_[lev], lev, (time + dt_radiation), quokka::centering::cc, quokka::direction::na, PreInterpState,
+	amrex::MultiFab state_old_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_old_tmp, state_old_cc_[lev], 0, 0, ncomp_cc, 0);
+	fillBoundaryConditions(state_old_tmp, state_old_tmp, lev, time, quokka::centering::cc, quokka::direction::na, PreInterpState, PostInterpState);
+
+	amrex::MultiFab state_inter_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_inter_tmp, state_new_cc_[lev], 0, 0, ncomp_cc, 0);
+	fillBoundaryConditions(state_inter_tmp, state_inter_tmp, lev, (time + dt_radiation), quokka::centering::cc, quokka::direction::na, PreInterpState,
 			       PostInterpState);
 
+	amrex::MultiFab state_new_tmp(grids[lev], dmap[lev], ncomp_cc, nghost_cc_);
+
 	// advance all grids on local processor (Stage 2 of integrator)
-	for (amrex::MFIter iter(state_new_cc_[lev]); iter.isValid(); ++iter) {
+	for (amrex::MFIter iter(state_new_tmp); iter.isValid(); ++iter) {
 		const amrex::Box &indexRange = iter.validbox();
-		auto const &stateOld_cc = state_old_cc_[lev].const_array(iter);
-		auto const &stateInter_cc = state_new_cc_[lev].const_array(iter);
-		auto const &stateNew_cc = state_new_cc_[lev].array(iter);
+		auto const &stateOld_cc = state_old_tmp.const_array(iter);
+		auto const &stateInter_cc = state_inter_tmp.const_array(iter);
+		auto const &stateNew_cc = state_new_tmp.array(iter);
 		auto [fluxArraysOld, fluxDiffusiveArraysOld] = computeRadiationFluxes(stateOld_cc, indexRange, ncompHyperbolic_, dx);
 		auto [fluxArrays, fluxDiffusiveArrays] = computeRadiationFluxes(stateInter_cc, indexRange, ncompHyperbolic_, dx);
 
@@ -2480,7 +2491,7 @@ void QuokkaSimulation<problem_t>::advanceRadiationMidpointRK2(int lev, amrex::Re
 		    dt_radiation, dx, indexRange, ncompHyperbolic_);
 
 		if (do_reflux) {
-			auto expandedFluxes = expandFluxArrays(fluxArrays, nstartHyperbolic_, state_new_cc_[lev].nComp());
+			auto expandedFluxes = expandFluxArrays(fluxArrays, nstartHyperbolic_, ncomp_cc);
 			for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
 				refluxFluxes[dir][iter].copy<amrex::RunOn::Device>(expandedFluxes[dir], expandedFluxes[dir].box(), 0, expandedFluxes[dir].box(),
 										   0, refluxFluxes[dir].nComp());
@@ -2491,6 +2502,8 @@ void QuokkaSimulation<problem_t>::advanceRadiationMidpointRK2(int lev, amrex::Re
 	if (do_reflux) {
 		incrementFluxRegisters(fr_as_crse, fr_as_fine, refluxFluxes, lev, 0.5 * dt_radiation);
 	}
+
+	amrex::MultiFab::Copy(state_new_cc_[lev], state_new_tmp, 0, 0, ncomp_cc, 0);
 }
 
 template <typename problem_t>
