@@ -1225,7 +1225,7 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 	}
 
 	amrex::MultiFab accepted_state_cc(grids[lev], dmap[lev], Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
-	amrex::Copy(accepted_state_cc, state_old_cc_[lev], 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
+	amrex::MultiFab::Copy(accepted_state_cc, state_old_cc_[lev], 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 	std::array<amrex::MultiFab, AMREX_SPACEDIM> accepted_state_fc;
 	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -1236,7 +1236,7 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 	}
 
 	auto restoreHydroState = [&]() {
-		amrex::Copy(state_new_cc_[lev], accepted_state_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
+		amrex::MultiFab::Copy(state_new_cc_[lev], accepted_state_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				amrex::Copy(state_new_fc_[lev][idim], accepted_state_fc[idim], 0, 0, Physics_Indices<problem_t>::nvarPerDim_fc, nghost_fc_);
@@ -1245,7 +1245,7 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 	};
 
 	auto updateAcceptedHydroState = [&]() {
-		amrex::Copy(accepted_state_cc, state_new_cc_[lev], 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
+		amrex::MultiFab::Copy(accepted_state_cc, state_new_cc_[lev], 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				amrex::Copy(accepted_state_fc[idim], state_new_fc_[lev][idim], 0, 0, Physics_Indices<problem_t>::nvarPerDim_fc, nghost_fc_);
@@ -1271,7 +1271,7 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 		}
 
 		amrex::MultiFab state_old_cc_tmp(grids[lev], dmap[lev], Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
-		amrex::Copy(state_old_cc_tmp, accepted_state_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
+		amrex::MultiFab::Copy(state_old_cc_tmp, accepted_state_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 
 		std::array<amrex::MultiFab, AMREX_SPACEDIM> state_old_fc_tmp;
 		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
@@ -1286,7 +1286,7 @@ void QuokkaSimulation<problem_t>::advanceHydroAtLevelWithRetries(int lev, amrex:
 
 		for (int substep_index = start_substep; substep_index < total_substeps; ++substep_index) {
 			if (substep_index > start_substep) {
-				amrex::Copy(state_old_cc_tmp, state_new_cc_[lev], 0, 0, ncompHydro_, nghost_cc_);
+				amrex::MultiFab::Copy(state_old_cc_tmp, state_new_cc_[lev], 0, 0, ncompHydro_, 0);
 				if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 					for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 						amrex::Copy(state_old_fc_tmp[idim], state_new_fc_[lev][idim], 0, 0, Physics_Indices<problem_t>::nvarPerDim_fc,
@@ -1411,6 +1411,8 @@ auto QuokkaSimulation<problem_t>::advanceHydroAtLevel(amrex::MultiFab &state_old
 	// create temporary multifab for intermediate state
 	amrex::MultiFab state_inter_cc_(grids[lev], dmap[lev], Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
 	state_inter_cc_.setVal(0); // prevent assert in fillBoundaryConditions when radiation is enabled
+	amrex::MultiFab state_final_cc(grids[lev], dmap[lev], Physics_Indices<problem_t>::nvarTotal_cc, nghost_cc_);
+	amrex::MultiFab::Copy(state_final_cc, state_old_cc_tmp, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 	std::array<amrex::MultiFab, AMREX_SPACEDIM> state_inter_fc_;
 	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -1624,7 +1626,7 @@ auto QuokkaSimulation<problem_t>::advanceHydroAtLevel(amrex::MultiFab &state_old
 
 		auto const &stateOld_cc = state_old_cc_tmp;
 		auto const &stateInter_cc = state_inter_cc_;
-		auto &stateFinal_cc = state_new_cc_[lev];
+		auto &stateFinal_cc = state_final_cc;
 
 		auto const &stateOld_fc = state_old_fc_tmp;
 		auto const &stateInter_fc = state_inter_fc_;
@@ -1714,13 +1716,14 @@ auto QuokkaSimulation<problem_t>::advanceHydroAtLevel(amrex::MultiFab &state_old
 		}
 
 	} else { // we are only doing forward Euler
-		amrex::Copy(state_new_cc_[lev], state_inter_cc_, 0, 0, ncompHydro_, 0);
+		amrex::MultiFab::Copy(state_final_cc, state_inter_cc_, 0, 0, ncompHydro_, 0);
 		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				amrex::Copy(state_new_fc_[lev][idim], state_inter_fc_[idim], 0, 0, Physics_Indices<problem_t>::nvarPerDim_fc, 0);
 			}
 		}
 	}
+	amrex::MultiFab::Copy(state_new_cc_[lev], state_final_cc, 0, 0, Physics_Indices<problem_t>::nvarTotal_cc, 0);
 	amrex::Gpu::streamSynchronizeAll();
 
 	// do Strang split source terms (second half-step)

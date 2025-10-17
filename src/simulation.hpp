@@ -2049,13 +2049,12 @@ void AMRSimulation<problem_t>::MakeNewLevelFromCoarse(int level, amrex::Real tim
 
 	// cell-centred
 	const int ncomp_cc = state_new_cc_[level - 1].nComp();
-	const int nghost_cc = state_new_cc_[level - 1].nGrow();
-	state_new_cc_[level].define(ba, dm, ncomp_cc, nghost_cc);
-	state_old_cc_[level].define(ba, dm, ncomp_cc, nghost_cc);
+	state_new_cc_[level].define(ba, dm, ncomp_cc, 0);
+	state_old_cc_[level].define(ba, dm, ncomp_cc, 0);
 	FillCoarsePatch(level, time, state_new_cc_[level], 0, ncomp_cc, BCs_cc_, quokka::centering::cc, quokka::direction::na);
 	FillCoarsePatch(level, time, state_old_cc_[level], 0, ncomp_cc, BCs_cc_, quokka::centering::cc, quokka::direction::na); // also necessary
 
-	max_signal_speed_[level].define(ba, dm, 1, nghost_cc);
+	max_signal_speed_[level].define(ba, dm, 1, 0);
 	tNew_[level] = time;
 	tOld_[level] = time - 1.e200;
 
@@ -2101,14 +2100,14 @@ void AMRSimulation<problem_t>::RemakeLevel(int level, amrex::Real time, const am
 
 	// cell-centred
 	const int ncomp_cc = state_new_cc_[level].nComp();
-	const int nghost_cc = state_new_cc_[level].nGrow();
+	const int nghost_cc = 0;
 	amrex::MultiFab int_state_new_cc(ba, dm, ncomp_cc, nghost_cc);
 	amrex::MultiFab int_state_old_cc(ba, dm, ncomp_cc, nghost_cc);
 	FillPatch(level, time, int_state_new_cc, 0, ncomp_cc, quokka::centering::cc, quokka::direction::na, FillPatchType::fillpatch_function);
 	std::swap(int_state_new_cc, state_new_cc_[level]);
 	std::swap(int_state_old_cc, state_old_cc_[level]);
 
-	amrex::MultiFab max_signal_speed(ba, dm, 1, nghost_cc);
+	amrex::MultiFab max_signal_speed(ba, dm, 1, 0);
 	std::swap(max_signal_speed, max_signal_speed_[level]);
 
 	tNew_[level] = time;
@@ -2274,7 +2273,6 @@ void AMRSimulation<problem_t>::FillPatch(int lev, amrex::Real time, amrex::Multi
 template <typename problem_t> void AMRSimulation<problem_t>::setInitialConditionsAtLevel_cc(int level, amrex::Real time)
 {
 	const int ncomp_cc = Physics_Indices<problem_t>::nvarTotal_cc;
-	const int nghost_cc = nghost_cc_;
 	// iterate over the domain
 	for (amrex::MFIter iter(state_new_cc_[level]); iter.isValid(); ++iter) {
 		quokka::grid grid_elem(state_new_cc_[level].array(iter), iter.validbox(), geom[level].CellSizeArray(), geom[level].ProbLoArray(),
@@ -2288,7 +2286,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::setInitialCondition
 	fillBoundaryConditions(state_new_cc_[level], state_new_cc_[level], level, time, quokka::centering::cc, quokka::direction::na, InterpHookNone,
 			       InterpHookNone, FillPatchType::fillpatch_function);
 	// copy to state_old_cc_ (including ghost zones)
-	state_old_cc_[level].ParallelCopy(state_new_cc_[level], 0, 0, ncomp_cc, nghost_cc, nghost_cc);
+	state_old_cc_[level].ParallelCopy(state_new_cc_[level], 0, 0, ncomp_cc, 0, 0);
 }
 
 template <typename problem_t> void AMRSimulation<problem_t>::setInitialConditionsAtLevel_fc(int level, amrex::Real time)
@@ -2328,10 +2326,9 @@ void AMRSimulation<problem_t>::MakeNewLevelFromScratch(int level, amrex::Real ti
 
 	// cell-centred
 	const int ncomp_cc = Physics_Indices<problem_t>::nvarTotal_cc;
-	const int nghost_cc = nghost_cc_;
-	state_new_cc_[level].define(ba, dm, ncomp_cc, nghost_cc);
-	state_old_cc_[level].define(ba, dm, ncomp_cc, nghost_cc);
-	max_signal_speed_[level].define(ba, dm, 1, nghost_cc);
+	state_new_cc_[level].define(ba, dm, ncomp_cc, 0);
+	state_old_cc_[level].define(ba, dm, ncomp_cc, 0);
+	max_signal_speed_[level].define(ba, dm, 1, 0);
 
 	tNew_[level] = time;
 	tOld_[level] = time - 1.e200;
@@ -2891,12 +2888,15 @@ template <typename problem_t> auto AMRSimulation<problem_t>::PlotFileMFAtLevel_c
 	const int ncomp_plotMF = plotfileVarsToInclude_cc_.size();
 	amrex::MultiFab plotMF(grids[lev], dmap[lev], ncomp_plotMF, included_ghosts);
 
+	std::unique_ptr<amrex::MultiFab> ghosted_state_cc;
+	amrex::MultiFab const *state_for_plot = &state_new_cc_[lev];
 	if (included_ghosts > 0) {
-		// Fill ghost zones for state_new_cc_
-		fillBoundaryConditions(state_new_cc_[lev], state_new_cc_[lev], lev, tNew_[lev], quokka::centering::cc, quokka::direction::na, InterpHookNone,
-				       InterpHookNone, FillPatchType::fillpatch_function);
+		ghosted_state_cc = std::make_unique<amrex::MultiFab>(grids[lev], dmap[lev], state_new_cc_[lev].nComp(), included_ghosts);
+		FillPatch(lev, tNew_[lev], *ghosted_state_cc, 0, ghosted_state_cc->nComp(), quokka::centering::cc, quokka::direction::na,
+			  FillPatchType::fillpatch_function);
+		state_for_plot = ghosted_state_cc.get();
 
-		// Fill ghost zones for state_new_fc_
+		// Fill ghost zones for face-centred data if requested
 		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				fillBoundaryConditions(state_new_fc_[lev][idim], state_new_fc_[lev][idim], lev, tNew_[lev], quokka::centering::fc,
@@ -2912,7 +2912,7 @@ template <typename problem_t> auto AMRSimulation<problem_t>::PlotFileMFAtLevel_c
 		auto cc_it = std::find(componentNames_cc_.begin(), componentNames_cc_.end(), varname);
 		if (cc_it != componentNames_cc_.end()) {
 			int cc_comp = std::distance(componentNames_cc_.begin(), cc_it);
-			amrex::MultiFab::Copy(plotMF, state_new_cc_[lev], cc_comp, comp, 1, included_ghosts);
+			amrex::MultiFab::Copy(plotMF, *state_for_plot, cc_comp, comp, 1, included_ghosts);
 			comp++;
 			continue;
 		}
@@ -3768,10 +3768,9 @@ template <typename problem_t> void AMRSimulation<problem_t>::ReadCheckpointFile(
 
 		// build MultiFab and FluxRegister data
 		const int ncomp_cc = Physics_Indices<problem_t>::nvarTotal_cc;
-		const int nghost_cc = nghost_cc_;
-		state_old_cc_[lev].define(grids[lev], dmap[lev], ncomp_cc, nghost_cc);
-		state_new_cc_[lev].define(grids[lev], dmap[lev], ncomp_cc, nghost_cc);
-		max_signal_speed_[lev].define(ba, dm, 1, nghost_cc);
+		state_old_cc_[lev].define(grids[lev], dmap[lev], ncomp_cc, 0);
+		state_new_cc_[lev].define(grids[lev], dmap[lev], ncomp_cc, 0);
+		max_signal_speed_[lev].define(ba, dm, 1, 0);
 
 		if (lev > 0 && (do_reflux != 0)) {
 			flux_reg_[lev] = std::make_unique<amrex::FluxRegister>(ba, dm, refRatio(lev - 1), lev, ncomp_cc);
