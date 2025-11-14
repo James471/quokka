@@ -20,6 +20,18 @@ We want to let users (and future Python bindings) customize Quokka scenarios wit
 3. **pybind11 Exposure:** When building the upcoming `pyquokka` module, expose hook setters/getters so Python scripts can register functions. Python users will select one of the precompiled problem types (to satisfy the compile-time requirements above) and then attach host-only behavior dynamically.
 4. **Documentation & Examples:** Once the hook infrastructure lands, add user-facing docs/examples that demonstrate registering initialization logic and diagnostics from Python while relying on precompiled device kernels for performance-sensitive code.
 
+## pyquokka pybind11 Module Structure
+
+- **Single extension:** Build one `pyquokka` module (`PYBIND11_MODULE(pyquokka, m)`) that depends only on pybind11 plus the Quokka/AMReX headers already in tree. Keep nanobind out so any types shared with pyAMReX continue to use the same pybind11 registries.
+- **File layout:** Organize bindings under `bindings/` (e.g., `simulation.cpp`, `hooks.cpp`, `layout.cpp`) but export everything through the single module to avoid duplicate registries. A shared `bindings/common.hpp` should include pybind11 headers and any `NB_MAKE_OPAQUE` macros once needed.
+- **Submodules/namespaces:**
+  - `pyquokka.simulation`: wraps the non-templated `QuokkaSimulation`/`AMRSimulation` facade. Expose constructors that take a descriptor enum plus runtime `PhysicsLayout` and inputs path, along with methods such as `initialize()`, `evolve(nsteps)`, and `write_plotfile()`. Any pyAMReX types required here should be passed via capsules or not exposed until pyAMReX provides casters.
+  - `pyquokka.hooks`: mirrors the `ProblemHooks` struct, providing setters like `set_initial_conditions(func)`, `set_before_timestep(func)`, etc. Each setter stores a `std::function` that captures the Python callable with a GIL-safe trampoline.
+  - `pyquokka.layout`: binds the runtime `PhysicsLayout` struct and descriptor enums so Python can introspect offsets and feature flags when constructing hooks. All properties should be read-only to keep invariants enforced on the C++ side.
+  - `pyquokka.state`: utility helpers that expose read-only views of `MultiFab`/`FArrayBox` data. For now this can return capsules that pyAMReX understands, or lightweight NumPy arrays built via `py::array` referencing host data.
+- **Binding patterns:** use `py::class_` for POD structs and shared-pointer-aware `py::class_` for owning simulation objects, wrap hook callbacks with helper lambdas that acquire the GIL before invoking Python, and lean on pyAMReX casters where they already exist.
+- **Incremental plan:** (1) land the `ProblemHooks` and runtime descriptor/layout refactor, (2) add the pybind11 target and stub module exporting the descriptor/layout APIs, (3) wire in hook setters plus a smoke-test script that registers a Python callable and runs a short evolve step.
+
 ## Runtime Physics Configuration Without Kernel Overhead
 
 We need three properties simultaneously:
