@@ -159,3 +159,17 @@ if(AMReX_GPU_BACKEND MATCHES "CUDA")
 endif()
 
 add_test(NAME experimental_advection COMMAND experimental_advection)
+
+if(QUOKKA_BUILD_PYTHON_BINDINGS)
+  find_package(pybind11 CONFIG QUIET)
+  if(NOT pybind11_FOUND)
+    message(FATAL_ERROR "pybind11 not found. Install pybind11 with `pip install pybind11` or provide pybind11_DIR.")
+  endif()
+  pybind11_add_module(pyquokka MODULE
+    bindings/pyquokka.cpp
+    experimental/DescriptorPrototype.cpp)
+  target_include_directories(pyquokka PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(pyquokka PRIVATE AMReX::amrex fmt::fmt hdf5::hdf5 yaml-cpp::yaml-cpp)
+  # scikit-build only copies targets that participate in the "install" step.
+  install(TARGETS pyquokka DESTINATION .)
+endif()

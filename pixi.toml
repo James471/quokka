@@ -1,0 +1,18 @@
+[workspace]
+name = "pyquokka"
+version = "0.1.0"
+description = "Pixi environment for building the pyquokka module"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = ">=3.10,<3.12"
+cmake = ">=3.26"
+ninja = ">=1.11"
+pybind11 = ">=2.11"
+pip = "*"
+openmpi = ">=5.0"
+
+[tasks.build]
+cmd = "pip install ."
+env = { MPI_C_COMPILER = "mpicc", MPI_CXX_COMPILER = "mpicxx" }

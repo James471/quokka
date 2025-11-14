@@ -29,6 +29,7 @@ set(AMReX_TINY_PROFILE ON CACHE BOOL "" FORCE)
 ##   see: https://cmake.org/cmake/help/latest/module/FindPython.html#hints
 ## NumPy and Matplotlib can be installed with `python3 -m pip install numpy matplotlib --user`
 option(QUOKKA_PYTHON "Compile with Python support (on/off)" ON)
+option(QUOKKA_BUILD_PYTHON_BINDINGS "Build the pyquokka Python module" OFF)
 option(DISABLE_FMAD "Disable fused multiply-add instructions on GPU (on/off)" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_HWASAN "Enable HWAddressSanitizer" OFF)
