@@ -1,6 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <array>
+#include <utility>
+
 #include "AMReX.H"
 #include "experimental/DescriptorPrototype.hpp"
 #include "grid.hpp"
@@ -11,27 +14,30 @@ using quokka::experimental::AdvectionSimulationPrototype;
 namespace
 {
 
+auto makeGridObject(quokka::grid const &grid) -> py::object
+{
+	return py::cast(&grid, py::return_value_policy::reference);
+}
+
+auto makeRangePair(const amrex::Box &box, int dir) -> std::pair<int, int>
+{
+	return std::make_pair(box.smallEnd(dir), box.bigEnd(dir));
+}
+
+auto makeArray(amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> const &values) -> std::array<amrex::Real, AMREX_SPACEDIM>
+{
+	std::array<amrex::Real, AMREX_SPACEDIM> result{};
+	for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+		result[d] = values[d];
+	}
+	return result;
+}
+
 auto makeInitializeHook(py::function func)
 {
 	return [func = std::move(func)](quokka::grid const &grid) {
 		py::gil_scoped_acquire gil;
-		const auto dx = grid.dx_;
-		const auto prob_lo = grid.prob_lo_;
-		const amrex::Box &indexRange = grid.indexRange_;
-		const amrex::Array4<double> &state = grid.array_;
-		const int k_lo = (AMREX_SPACEDIM >= 3) ? indexRange.smallEnd(2) : 0;
-		const int k_hi = (AMREX_SPACEDIM >= 3) ? indexRange.bigEnd(2) : 0;
-		const int j_lo = (AMREX_SPACEDIM >= 2) ? indexRange.smallEnd(1) : 0;
-		const int j_hi = (AMREX_SPACEDIM >= 2) ? indexRange.bigEnd(1) : 0;
-		for (int k = k_lo; k <= k_hi; ++k) {
-			for (int j = j_lo; j <= j_hi; ++j) {
-				for (int i = indexRange.smallEnd(0); i <= indexRange.bigEnd(0); ++i) {
-					amrex::Real const x = prob_lo[0] + (static_cast<amrex::Real>(i) + 0.5) * dx[0];
-					auto value = func(x).cast<amrex::Real>();
-					state(i, j, k, 0) = value;
-				}
-			}
-		}
+		func(makeGridObject(grid));
 	};
 }
 
@@ -39,23 +45,7 @@ auto makeExactHook(py::function func)
 {
 	return [func = std::move(func)](quokka::grid const &grid, amrex::Real time) {
 		py::gil_scoped_acquire gil;
-		const auto dx = grid.dx_;
-		const auto prob_lo = grid.prob_lo_;
-		const amrex::Box &indexRange = grid.indexRange_;
-		const amrex::Array4<double> &state = grid.array_;
-		const int k_lo = (AMREX_SPACEDIM >= 3) ? indexRange.smallEnd(2) : 0;
-		const int k_hi = (AMREX_SPACEDIM >= 3) ? indexRange.bigEnd(2) : 0;
-		const int j_lo = (AMREX_SPACEDIM >= 2) ? indexRange.smallEnd(1) : 0;
-		const int j_hi = (AMREX_SPACEDIM >= 2) ? indexRange.bigEnd(1) : 0;
-		for (int k = k_lo; k <= k_hi; ++k) {
-			for (int j = j_lo; j <= j_hi; ++j) {
-				for (int i = indexRange.smallEnd(0); i <= indexRange.bigEnd(0); ++i) {
-					amrex::Real const x = prob_lo[0] + (static_cast<amrex::Real>(i) + 0.5) * dx[0];
-					auto value = func(x, time).cast<amrex::Real>();
-					state(i, j, k, 0) = value;
-				}
-			}
-		}
+		func(makeGridObject(grid), time);
 	};
 }
 
@@ -85,6 +75,28 @@ PYBIND11_MODULE(pyquokka, m)
 			amrex::Finalize();
 		}
 	});
+
+	py::class_<quokka::grid>(m, "Grid")
+	    .def_property_readonly("dx", [](quokka::grid const &grid) { return makeArray(grid.dx_); })
+	    .def_property_readonly("prob_lo", [](quokka::grid const &grid) { return makeArray(grid.prob_lo_); })
+	    .def_property_readonly("prob_hi", [](quokka::grid const &grid) { return makeArray(grid.prob_hi_); })
+	    .def_property_readonly("i_range", [](quokka::grid const &grid) { return makeRangePair(grid.indexRange_, 0); })
+#if (AMREX_SPACEDIM >= 2)
+	    .def_property_readonly("j_range", [](quokka::grid const &grid) { return makeRangePair(grid.indexRange_, 1); })
+#endif
+#if (AMREX_SPACEDIM >= 3)
+	    .def_property_readonly("k_range", [](quokka::grid const &grid) { return makeRangePair(grid.indexRange_, 2); })
+#endif
+	    .def("get_state",
+		 [](quokka::grid const &grid, int i, int j, int k, int component) { return grid.array_(i, j, k, component); }, py::arg("i"),
+		 py::arg("j") = 0, py::arg("k") = 0, py::arg("component") = 0)
+	    .def("set_state",
+		 [](quokka::grid const &grid, int i, int j, int k, int component, amrex::Real value) { grid.array_(i, j, k, component) = value; },
+		 py::arg("i"), py::arg("j") = 0, py::arg("k") = 0, py::arg("component") = 0, py::arg("value"))
+	    .def("set_state",
+		 [](quokka::grid const &grid, int i, amrex::Real value) { grid.array_(i, 0, 0, 0) = value; }, py::arg("i"), py::arg("value"))
+	    .def("get_state",
+		 [](quokka::grid const &grid, int i) { return grid.array_(i, 0, 0, 0); }, py::arg("i"));
 
 	py::class_<AdvectionSimulationPrototype>(m, "AdvectionSimulation")
 	    .def(py::init<>())
