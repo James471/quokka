@@ -3,9 +3,11 @@
 
 #include "AMReX_Array.H"
 #include "AMReX_Array4.H"
+#include "AMReX_AmrCore.H"
 #include "AMReX_Box.H"
 #include "AMReX_Dim3.H"
 #include "AMReX_GpuQualifiers.H"
+#include "AMReX_TagBox.H"
 #include "AMReX_Vector.H"
 #include "grid.hpp"
 #include "physics_numVars.hpp"
@@ -85,7 +87,7 @@ template <typename SimulationT> struct TypedProblemHooks {
 	HookFunc diagnostics;
 };
 
-class AMRSimulationPrototype
+class AMRSimulationPrototype : public amrex::AmrCore
 {
       public:
 	explicit AMRSimulationPrototype(PhysicsLayout layout);
@@ -122,8 +124,17 @@ class AMRSimulationPrototype
 	virtual void step() = 0;
 
       protected:
+	void setBaseGrid(int nx, amrex::Real prob_lo, amrex::Real prob_hi);
+
+	void ErrorEst(int lev, amrex::TagBoxArray &tags, amrex::Real time, int ngrow) override;
+	void MakeNewLevelFromScratch(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm) override;
+	void MakeNewLevelFromCoarse(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm) override;
+	void RemakeLevel(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm) override;
+	void ClearLevel(int lev) override;
+
 	PhysicsLayout layout_;
 	ProblemHooks hooks_;
+	amrex::Array<int, AMREX_SPACEDIM> periodicity_{AMREX_D_DECL(1, 0, 0)};
 };
 
 class AdvectionSimulationPrototype : public AMRSimulationPrototype

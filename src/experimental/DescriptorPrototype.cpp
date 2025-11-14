@@ -1,14 +1,110 @@
 #include "experimental/DescriptorPrototype.hpp"
+#include "AMReX_DistributionMapping.H"
 #include "AMReX_Print.H"
 #include <cmath>
+#include <algorithm>
+#include <array>
 #include <utility>
 
 namespace quokka::experimental
 {
 
-AMRSimulationPrototype::AMRSimulationPrototype(PhysicsLayout layout) : layout_(layout) { setRuntimePhysicsLayout(layout_); }
+namespace
+{
+
+auto makeDefaultGeometry() -> amrex::Geometry
+{
+	amrex::IntVect lo = amrex::IntVect::TheZeroVector();
+	amrex::IntVect hi = amrex::IntVect::TheZeroVector();
+	amrex::Box domain(lo, hi);
+	std::array<amrex::Real, AMREX_SPACEDIM> rb_lo{AMREX_D_DECL(0.0, 0.0, 0.0)};
+	std::array<amrex::Real, AMREX_SPACEDIM> rb_hi{AMREX_D_DECL(1.0, 1.0, 1.0)};
+	amrex::RealBox real_box(rb_lo, rb_hi);
+	amrex::Array<int, AMREX_SPACEDIM> periodic{AMREX_D_DECL(1, 0, 0)};
+	return amrex::Geometry(domain, &real_box, 0, periodic.data());
+}
+
+auto makeDefaultAmrInfo() -> amrex::AmrInfo
+{
+	amrex::AmrInfo info;
+	info.max_level = 0;
+	info.ref_ratio = {amrex::IntVect::TheUnitVector()};
+	info.blocking_factor = {amrex::IntVect::TheUnitVector()};
+	info.max_grid_size = {amrex::IntVect::TheUnitVector()};
+	info.n_error_buf = {amrex::IntVect::TheUnitVector()};
+	info.check_input = false;
+	return info;
+}
+
+} // namespace
+
+AMRSimulationPrototype::AMRSimulationPrototype(PhysicsLayout layout)
+    : amrex::AmrCore(makeDefaultGeometry(), makeDefaultAmrInfo()), layout_(layout)
+{
+	setRuntimePhysicsLayout(layout_);
+	setBaseGrid(1, 0.0, 1.0);
+}
 
 void AMRSimulationPrototype::setHooks(ProblemHooks hooks) { hooks_ = std::move(hooks); }
+
+void AMRSimulationPrototype::setBaseGrid(int nx, amrex::Real prob_lo, amrex::Real prob_hi)
+{
+	const int cells_x = std::max(nx, 1);
+	amrex::IntVect lo = amrex::IntVect::TheZeroVector();
+	amrex::IntVect hi = amrex::IntVect::TheZeroVector();
+	hi[0] = cells_x - 1;
+#if (AMREX_SPACEDIM >= 2)
+	hi[1] = 0;
+#endif
+#if (AMREX_SPACEDIM == 3)
+	hi[2] = 0;
+#endif
+	amrex::Box domain(lo, hi);
+	std::array<amrex::Real, AMREX_SPACEDIM> rb_lo{AMREX_D_DECL(prob_lo, 0.0, 0.0)};
+	std::array<amrex::Real, AMREX_SPACEDIM> rb_hi{AMREX_D_DECL(prob_hi, 1.0, 1.0)};
+	amrex::RealBox real_box(rb_lo, rb_hi);
+	amrex::Geometry geom(domain, &real_box, 0, periodicity_.data());
+	SetGeometry(0, geom);
+	amrex::BoxArray ba(domain);
+	amrex::DistributionMapping dm(ba);
+	SetBoxArray(0, ba);
+	SetDistributionMap(0, dm);
+	SetFinestLevel(0);
+}
+
+void AMRSimulationPrototype::ErrorEst(int lev, amrex::TagBoxArray &tags, amrex::Real time, int ngrow)
+{
+	(void)lev;
+	(void)tags;
+	(void)time;
+	(void)ngrow;
+}
+
+void AMRSimulationPrototype::MakeNewLevelFromScratch(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
+{
+	(void)lev;
+	(void)time;
+	(void)ba;
+	(void)dm;
+}
+
+void AMRSimulationPrototype::MakeNewLevelFromCoarse(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
+{
+	(void)lev;
+	(void)time;
+	(void)ba;
+	(void)dm;
+}
+
+void AMRSimulationPrototype::RemakeLevel(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
+{
+	(void)lev;
+	(void)time;
+	(void)ba;
+	(void)dm;
+}
+
+void AMRSimulationPrototype::ClearLevel(int lev) { (void)lev; }
 
 auto AdvectionSimulationPrototype::defaultLayout() -> PhysicsLayout
 {
@@ -42,6 +138,7 @@ void AdvectionSimulationPrototype::configureGrid(int nx, amrex::Real prob_lo, am
 	state_.assign(nx_, 0.0);
 	scratch_ = state_;
 	state_initialized_ = false;
+	setBaseGrid(nx_, prob_lo_, prob_hi_);
 }
 
 void AdvectionSimulationPrototype::setCfl(amrex::Real cfl)
