@@ -140,7 +140,8 @@ set (QuokkaSourcesNoEOS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/io/DiagPDF.cpp" 
                         "${CMAKE_CURRENT_SOURCE_DIR}/io/DiagPlotfile.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/io/DiagProjectionPlot.cpp"
-                        "${CMAKE_CURRENT_SOURCE_DIR}/io/projection.cpp" 
+                        "${CMAKE_CURRENT_SOURCE_DIR}/io/projection.cpp"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/experimental/DescriptorPrototype.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/cooling/ResampledCooling.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/util/fextract.cpp"
                         "${openPMDSources}")
@@ -148,3 +149,9 @@ set (QuokkaSourcesNoEOS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
 set (QuokkaObjSources "${QuokkaSourcesNoEOS}" "${gamma_law_sources}")
 
 add_subdirectory(problems)
+
+add_executable(experimental_advection
+  experimental/testAdvectionPrototype.cpp
+  experimental/DescriptorPrototype.cpp)
+
+add_test(NAME experimental_advection COMMAND experimental_advection)
