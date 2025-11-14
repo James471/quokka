@@ -2,12 +2,18 @@
 #define QUOKKA_DESCRIPTOR_PROTOTYPE_HPP_
 
 #include "AMReX_Array.H"
+#include "AMReX_Array4.H"
+#include "AMReX_Box.H"
+#include "AMReX_Dim3.H"
 #include "AMReX_GpuQualifiers.H"
+#include "AMReX_Vector.H"
+#include "grid.hpp"
 #include "physics_numVars.hpp"
 #include <functional>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace quokka::experimental
@@ -53,18 +59,63 @@ template <typename... Modules> struct PhysicsDescriptor {
 	AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE static auto layout() -> PhysicsLayout const & { return runtime_physics_layout; }
 };
 
+class AMRSimulationPrototype;
+
 struct ProblemHooks {
-	std::function<void()> pre_timestep;
-	std::function<void()> post_timestep;
-	std::function<void()> diagnostics;
+	using InitializeFunc = std::function<void(quokka::grid const &)>;
+	using ExactSolutionFunc = std::function<void(quokka::grid const &, amrex::Real)>;
+	using HookFunc = std::function<void(AMRSimulationPrototype &)>;
+
+	InitializeFunc initialize;
+	ExactSolutionFunc exact_solution;
+	HookFunc pre_timestep;
+	HookFunc post_timestep;
+	HookFunc diagnostics;
 };
 
-class AMRSimulationPrototype {
+template <typename SimulationT> struct TypedProblemHooks {
+	using InitializeFunc = ProblemHooks::InitializeFunc;
+	using ExactSolutionFunc = ProblemHooks::ExactSolutionFunc;
+	using HookFunc = std::function<void(SimulationT &)>;
+
+	InitializeFunc initialize;
+	ExactSolutionFunc exact_solution;
+	HookFunc pre_timestep;
+	HookFunc post_timestep;
+	HookFunc diagnostics;
+};
+
+class AMRSimulationPrototype
+{
       public:
 	explicit AMRSimulationPrototype(PhysicsLayout layout);
 	virtual ~AMRSimulationPrototype() = default;
 
 	void setHooks(ProblemHooks hooks);
+	template <typename SimulationT> void setHooks(TypedProblemHooks<SimulationT> hooks)
+	{
+		ProblemHooks base_hooks;
+		if (hooks.initialize) {
+			base_hooks.initialize = std::move(hooks.initialize);
+		}
+		if (hooks.exact_solution) {
+			base_hooks.exact_solution = std::move(hooks.exact_solution);
+		}
+		if (hooks.pre_timestep) {
+			base_hooks.pre_timestep = [func = std::move(hooks.pre_timestep)](AMRSimulationPrototype &sim) {
+				func(static_cast<SimulationT &>(sim));
+			};
+		}
+		if (hooks.post_timestep) {
+			base_hooks.post_timestep = [func = std::move(hooks.post_timestep)](AMRSimulationPrototype &sim) {
+				func(static_cast<SimulationT &>(sim));
+			};
+		}
+		if (hooks.diagnostics) {
+			base_hooks.diagnostics = [func = std::move(hooks.diagnostics)](AMRSimulationPrototype &sim) { func(static_cast<SimulationT &>(sim)); };
+		}
+		setHooks(std::move(base_hooks));
+	}
 
 	[[nodiscard]] auto layout() const -> PhysicsLayout const & { return layout_; }
 
@@ -75,10 +126,14 @@ class AMRSimulationPrototype {
 	ProblemHooks hooks_;
 };
 
-class AdvectionSimulationPrototype : public AMRSimulationPrototype {
+class AdvectionSimulationPrototype : public AMRSimulationPrototype
+{
       public:
 	using Descriptor = PhysicsDescriptor<HydroModule>;
 
+	static auto defaultLayout() -> PhysicsLayout;
+
+	AdvectionSimulationPrototype();
 	explicit AdvectionSimulationPrototype(PhysicsLayout layout);
 
 	void setAdvectionVelocity(amrex::Real vx, amrex::Real vy, amrex::Real vz);
@@ -87,11 +142,11 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype {
 	void setMaxTime(amrex::Real stop_time);
 	void setMaxTimesteps(int steps);
 
-	using InitialConditionFunc = std::function<amrex::Real(amrex::Real)>;
-	using ExactSolutionFunc = std::function<amrex::Real(amrex::Real, amrex::Real)>;
+	struct Callbacks {
+		TypedProblemHooks<AdvectionSimulationPrototype> hooks;
+	};
 
-	void setInitialCondition(InitialConditionFunc func);
-	void setExactSolution(ExactSolutionFunc func);
+	void setCallbacks(Callbacks callbacks);
 
 	void initializeState();
 
@@ -101,11 +156,16 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype {
 	[[nodiscard]] auto estimateMaxSignalSpeed() const -> amrex::Real;
 	[[nodiscard]] auto errorNorm() const -> amrex::Real { return error_norm_; }
 	[[nodiscard]] auto currentTime() const -> amrex::Real { return time_; }
-	[[nodiscard]] auto state() const -> std::vector<amrex::Real> const & { return state_; }
+	[[nodiscard]] auto state() const -> amrex::Vector<amrex::Real> const & { return state_; }
+	[[nodiscard]] auto numCells() const -> int { return nx_; }
+	[[nodiscard]] auto probLo() const -> amrex::Real { return prob_lo_; }
+	[[nodiscard]] auto probHi() const -> amrex::Real { return prob_hi_; }
+	[[nodiscard]] auto dx() const -> amrex::Real { return dx_; }
 
       private:
 	void advance(amrex::Real dt);
-	void computeError();
+		void computeError();
+	[[nodiscard]] auto buildGridView(amrex::Vector<amrex::Real> &storage) -> quokka::grid;
 
 	amrex::GpuArray<amrex::Real, 3> velocity_{0., 0., 0.};
 	int nx_ = 0;
@@ -118,13 +178,10 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype {
 
 	amrex::Real time_ = 0.;
 
-	InitialConditionFunc init_func_;
-	ExactSolutionFunc exact_func_;
 	bool state_initialized_ = false;
-	bool exact_available_ = false;
 
-	std::vector<amrex::Real> state_;
-	std::vector<amrex::Real> scratch_;
+	amrex::Vector<amrex::Real> state_;
+	amrex::Vector<amrex::Real> scratch_;
 
 	amrex::Real error_norm_ = 0.;
 };

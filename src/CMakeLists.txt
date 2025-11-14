@@ -152,6 +152,10 @@ add_subdirectory(problems)
 
 add_executable(experimental_advection
   experimental/testAdvectionPrototype.cpp
-  experimental/DescriptorPrototype.cpp)
+  ${QuokkaObjSources})
+
+if(AMReX_GPU_BACKEND MATCHES "CUDA")
+  setup_target_for_cuda_compilation(experimental_advection)
+endif()
 
 add_test(NAME experimental_advection COMMAND experimental_advection)
