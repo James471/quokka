@@ -30,9 +30,14 @@ def exact_func(grid: pyquokka.Grid, time: float) -> None:
 
 def init_func(grid: pyquokka.Grid) -> None:
     exact_func(grid, 0.0)
-  
-def diagnostics(time: float, err: float) -> None:
-    print(f"Prototype time = {time}, L1(error) = {err}")
+
+def diagnostics(sim: pyquokka.AdvectionSimulation) -> None:
+    time = sim.current_time()
+    err = sim.error_norm()
+    mf = sim.state()
+    ncomp = mf.n_comp
+    max_val = mf.max() # segfault happens here...
+    print(f"Prototype time = {time}, L1(error) = {err}, ncomp(state) = {ncomp}, max(state) = {max_val}")
 
 def main() -> int:
     pyquokka.initialize()

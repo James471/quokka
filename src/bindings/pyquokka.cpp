@@ -89,7 +89,7 @@ auto makeDiagnosticsHook(py::function func)
 {
 	return [func = std::move(func)](AdvectionSimulationPrototype &sim) {
 		py::gil_scoped_acquire gil;
-		func(sim.currentTime(), sim.errorNorm());
+		func(py::cast(&sim, py::return_value_policy::reference));
 	};
 }
 
@@ -164,5 +164,9 @@ PYBIND11_MODULE(pyquokka, m)
 		 py::arg("initial") = py::none(), py::arg("exact") = py::none(), py::arg("diagnostics") = py::none())
 	    .def("run", &AdvectionSimulationPrototype::run)
 	    .def("error_norm", &AdvectionSimulationPrototype::errorNorm)
-	    .def("current_time", &AdvectionSimulationPrototype::currentTime);
+	    .def("current_time", &AdvectionSimulationPrototype::currentTime)
+	    .def(
+		"state",
+		[](AdvectionSimulationPrototype &sim, int level) -> amrex::MultiFab & { return sim.state(level); }, py::arg("level") = 0,
+		py::return_value_policy::reference_internal);
 }

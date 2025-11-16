@@ -248,6 +248,16 @@ void AdvectionSimulationPrototype::setMaxTimesteps(int steps)
 	max_steps_ = steps;
 }
 
+auto AdvectionSimulationPrototype::state(int lev) -> amrex::MultiFab &
+{
+	return cellData(lev);
+}
+
+auto AdvectionSimulationPrototype::state(int lev) const -> amrex::MultiFab const &
+{
+	return cellData(lev);
+}
+
 void AdvectionSimulationPrototype::setCallbacks(Callbacks callbacks)
 {
 	const bool has_init_hook = static_cast<bool>(callbacks.hooks.initialize);

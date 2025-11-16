@@ -184,6 +184,8 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype
 	[[nodiscard]] auto probLo() const -> amrex::Real { return prob_lo_; }
 	[[nodiscard]] auto probHi() const -> amrex::Real { return prob_hi_; }
 	[[nodiscard]] auto dx() const -> amrex::Real { return dx_; }
+	[[nodiscard]] auto state(int lev = 0) -> amrex::MultiFab &;
+	[[nodiscard]] auto state(int lev = 0) const -> amrex::MultiFab const &;
 
       private:
 	void advance(amrex::Real dt);

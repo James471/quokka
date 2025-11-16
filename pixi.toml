@@ -12,6 +12,7 @@ ninja = ">=1.11"
 pybind11 = ">=2.11"
 pip = "*"
 openmpi = ">=5.0"
+numpy = ">=1.23"
 
 [tasks.build]
 cmd = "pip install ."
