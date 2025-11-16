@@ -1,6 +1,9 @@
 #include "experimental/DescriptorPrototype.hpp"
 #include "AMReX_DistributionMapping.H"
+#include "AMReX_Math.H"
+#include "AMReX_ParallelDescriptor.H"
 #include "AMReX_Print.H"
+#include "AMReX_Reduce.H"
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -49,6 +52,9 @@ void AMRSimulationPrototype::setHooks(ProblemHooks hooks) { hooks_ = std::move(h
 
 void AMRSimulationPrototype::setBaseGrid(int nx, amrex::Real prob_lo, amrex::Real prob_hi)
 {
+	state_cc_.clear();
+	scratch_cc_.clear();
+	grid_configured_ = false;
 	const int cells_x = std::max(nx, 1);
 	amrex::IntVect lo = amrex::IntVect::TheZeroVector();
 	amrex::IntVect hi = amrex::IntVect::TheZeroVector();
@@ -70,6 +76,82 @@ void AMRSimulationPrototype::setBaseGrid(int nx, amrex::Real prob_lo, amrex::Rea
 	SetBoxArray(0, ba);
 	SetDistributionMap(0, dm);
 	SetFinestLevel(0);
+	grid_configured_ = true;
+}
+
+void AMRSimulationPrototype::allocateLevelData(int lev, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
+{
+	const int num_levels = lev + 1;
+	if (static_cast<int>(state_cc_.size()) < num_levels) {
+		state_cc_.resize(num_levels);
+		scratch_cc_.resize(num_levels);
+	}
+	const int ncomp = layout_.total_cc_components;
+	AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ncomp > 0, "AMRSimulationPrototype requires at least one cell-centered component.");
+	state_cc_[lev] = std::make_unique<amrex::MultiFab>(ba, dm, ncomp, nghost_cc_);
+	scratch_cc_[lev] = std::make_unique<amrex::MultiFab>(ba, dm, ncomp, nghost_cc_);
+	state_cc_[lev]->setVal(0.0);
+	scratch_cc_[lev]->setVal(0.0);
+}
+
+auto AMRSimulationPrototype::cellData(int lev) -> amrex::MultiFab &
+{
+	if ((lev >= static_cast<int>(state_cc_.size())) || (state_cc_[lev] == nullptr)) {
+		throw std::runtime_error("cellData: level data not allocated.");
+	}
+	return *state_cc_[lev];
+}
+
+auto AMRSimulationPrototype::cellData(int lev) const -> amrex::MultiFab const &
+{
+	if ((lev >= static_cast<int>(state_cc_.size())) || (state_cc_[lev] == nullptr)) {
+		throw std::runtime_error("cellData: level data not allocated.");
+	}
+	return *state_cc_[lev];
+}
+
+auto AMRSimulationPrototype::scratchData(int lev) -> amrex::MultiFab &
+{
+	if ((lev >= static_cast<int>(scratch_cc_.size())) || (scratch_cc_[lev] == nullptr)) {
+		throw std::runtime_error("scratchData: level data not allocated.");
+	}
+	return *scratch_cc_[lev];
+}
+
+auto AMRSimulationPrototype::scratchData(int lev) const -> amrex::MultiFab const &
+{
+	if ((lev >= static_cast<int>(scratch_cc_.size())) || (scratch_cc_[lev] == nullptr)) {
+		throw std::runtime_error("scratchData: level data not allocated.");
+	}
+	return *scratch_cc_[lev];
+}
+
+void AMRSimulationPrototype::applyInitializeHook(int lev, amrex::MultiFab &mf) const
+{
+	if (!hooks_.initialize) {
+		mf.setVal(0.0);
+		return;
+	}
+	for (amrex::MFIter iter(mf); iter.isValid(); ++iter) {
+		quokka::grid grid_elem(mf.array(iter), iter.validbox(), Geom(lev).CellSizeArray(), Geom(lev).ProbLoArray(), Geom(lev).ProbHiArray(),
+				       quokka::centering::cc, quokka::direction::na);
+		hooks_.initialize(grid_elem);
+	}
+	mf.FillBoundary(Geom(lev).periodicity());
+}
+
+void AMRSimulationPrototype::applyExactSolutionHook(int lev, amrex::MultiFab &mf, amrex::Real time) const
+{
+	if (!hooks_.exact_solution) {
+		mf.setVal(0.0);
+		return;
+	}
+	for (amrex::MFIter iter(mf); iter.isValid(); ++iter) {
+		quokka::grid grid_elem(mf.array(iter), iter.validbox(), Geom(lev).CellSizeArray(), Geom(lev).ProbLoArray(), Geom(lev).ProbHiArray(),
+				       quokka::centering::cc, quokka::direction::na);
+		hooks_.exact_solution(grid_elem, time);
+	}
+	mf.FillBoundary(Geom(lev).periodicity());
 }
 
 void AMRSimulationPrototype::ErrorEst(int lev, amrex::TagBoxArray &tags, amrex::Real time, int ngrow)
@@ -82,29 +164,32 @@ void AMRSimulationPrototype::ErrorEst(int lev, amrex::TagBoxArray &tags, amrex::
 
 void AMRSimulationPrototype::MakeNewLevelFromScratch(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
 {
-	(void)lev;
 	(void)time;
-	(void)ba;
-	(void)dm;
+	allocateLevelData(lev, ba, dm);
 }
 
 void AMRSimulationPrototype::MakeNewLevelFromCoarse(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
 {
-	(void)lev;
 	(void)time;
-	(void)ba;
-	(void)dm;
+	AMREX_ALWAYS_ASSERT_WITH_MESSAGE(lev == 0, "MakeNewLevelFromCoarse not implemented for lev > 0 in prototype.");
+	allocateLevelData(lev, ba, dm);
 }
 
 void AMRSimulationPrototype::RemakeLevel(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm)
 {
-	(void)lev;
 	(void)time;
-	(void)ba;
-	(void)dm;
+	allocateLevelData(lev, ba, dm);
 }
 
-void AMRSimulationPrototype::ClearLevel(int lev) { (void)lev; }
+void AMRSimulationPrototype::ClearLevel(int lev)
+{
+	if (lev < static_cast<int>(state_cc_.size())) {
+		state_cc_[lev].reset();
+	}
+	if (lev < static_cast<int>(scratch_cc_.size())) {
+		scratch_cc_[lev].reset();
+	}
+}
 
 auto AdvectionSimulationPrototype::defaultLayout() -> PhysicsLayout
 {
@@ -135,8 +220,6 @@ void AdvectionSimulationPrototype::configureGrid(int nx, amrex::Real prob_lo, am
 	prob_lo_ = prob_lo;
 	prob_hi_ = prob_hi;
 	dx_ = (prob_hi_ - prob_lo_) / static_cast<amrex::Real>(nx_);
-	state_.assign(nx_, 0.0);
-	scratch_ = state_;
 	state_initialized_ = false;
 	setBaseGrid(nx_, prob_lo_, prob_hi_);
 }
@@ -179,15 +262,13 @@ void AdvectionSimulationPrototype::initializeState()
 	if (!hooks_.initialize) {
 		throw std::runtime_error("initializeState: initial condition callback not set.");
 	}
-	if (nx_ <= 0) {
+	if (!gridIsConfigured()) {
 		throw std::runtime_error("initializeState: grid not configured.");
 	}
-	if (static_cast<int>(state_.size()) != nx_) {
-		state_.assign(nx_, 0.0);
-	}
-	scratch_.resize(nx_);
-	auto grid_elem = buildGridView(state_);
-	hooks_.initialize(grid_elem);
+	const int lev = 0;
+	MakeNewLevelFromScratch(lev, 0.0, boxArray(lev), DistributionMap(lev));
+	auto &state = cellData(lev);
+	applyInitializeHook(lev, state);
 	time_ = 0.0;
 	state_initialized_ = true;
 	error_norm_ = 0.0;
@@ -201,10 +282,11 @@ auto AdvectionSimulationPrototype::estimateMaxSignalSpeed() const -> amrex::Real
 
 void AdvectionSimulationPrototype::advance(amrex::Real dt)
 {
-	if (nx_ == 0) {
+	if (!gridIsConfigured()) {
 		throw std::runtime_error("advance: grid not configured.");
 	}
-
+	auto &state = cellData(0);
+	auto &scratch = scratchData(0);
 	const amrex::Real vel = velocity_[0];
 	const amrex::Real abs_v = std::abs(vel);
 	if (abs_v == 0.0) {
@@ -212,18 +294,21 @@ void AdvectionSimulationPrototype::advance(amrex::Real dt)
 	}
 
 	const amrex::Real lambda = abs_v * dt / dx_;
+	state.FillBoundary(Geom(0).periodicity());
 
-	for (int i = 0; i < nx_; ++i) {
-		int left = (i - 1 + nx_) % nx_;
-		int right = (i + 1) % nx_;
-		if (vel >= 0.0) {
-			scratch_[i] = state_[i] - lambda * (state_[i] - state_[left]);
-		} else {
-			scratch_[i] = state_[i] - lambda * (state_[right] - state_[i]);
-		}
+	for (amrex::MFIter iter(state); iter.isValid(); ++iter) {
+		const amrex::Box &box = iter.validbox();
+		const auto state_arr = state.array(iter);
+		const auto scratch_arr = scratch.array(iter);
+		amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+			if (vel >= 0.0) {
+				scratch_arr(i, j, k, 0) = state_arr(i, j, k, 0) - lambda * (state_arr(i, j, k, 0) - state_arr(i - 1, j, k, 0));
+			} else {
+				scratch_arr(i, j, k, 0) = state_arr(i, j, k, 0) - lambda * (state_arr(i + 1, j, k, 0) - state_arr(i, j, k, 0));
+			}
+		});
 	}
-
-	state_.swap(scratch_);
+	amrex::MultiFab::Copy(state, scratch, 0, 0, state.nComp(), state.nGrow());
 }
 
 void AdvectionSimulationPrototype::computeError()
@@ -232,47 +317,18 @@ void AdvectionSimulationPrototype::computeError()
 		error_norm_ = 0.0;
 		return;
 	}
-	auto grid_exact = buildGridView(scratch_);
-	hooks_.exact_solution(grid_exact, time_);
+	auto &state = cellData(0);
+	auto &scratch = scratchData(0);
+	applyExactSolutionHook(0, scratch, time_);
+	amrex::MultiFab diff(state.boxArray(), state.DistributionMap(), state.nComp(), 0);
+	amrex::MultiFab::Copy(diff, state, 0, 0, state.nComp(), 0);
+	diff.minus(scratch, 0, state.nComp(), 0);
 	amrex::Real l1 = 0.0;
-	for (int i = 0; i < nx_; ++i) {
-		l1 += std::abs(state_[i] - scratch_[i]);
+	for (int comp = 0; comp < state.nComp(); ++comp) {
+		l1 += diff.norm1(comp, 0);
 	}
-	error_norm_ = l1 / static_cast<amrex::Real>(nx_);
-}
-
-auto AdvectionSimulationPrototype::buildGridView(amrex::Vector<amrex::Real> &storage) -> quokka::grid
-{
-	if (storage.empty()) {
-		throw std::runtime_error("buildGridView: state storage not allocated.");
-	}
-	amrex::IntVect small = amrex::IntVect::TheZeroVector();
-	amrex::IntVect big = amrex::IntVect::TheZeroVector();
-	big[0] = (nx_ > 0) ? (nx_ - 1) : 0;
-	amrex::Box box(small, big);
-	amrex::Dim3 begin{small[0], 0, 0};
-	amrex::Dim3 end{big[0] + 1, 1, 1};
-#if (AMREX_SPACEDIM >= 2)
-	begin.y = small[1];
-	end.y = big[1] + 1;
-#endif
-#if (AMREX_SPACEDIM == 3)
-	begin.z = small[2];
-	end.z = big[2] + 1;
-#endif
-	auto *raw = reinterpret_cast<double *>(storage.data());
-	amrex::Array4<double> array(raw, begin, end, 1);
-
-	amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> dx{};
-	amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_lo{};
-	amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_hi{};
-	for (int d = 0; d < AMREX_SPACEDIM; ++d) {
-		dx[d] = (d == 0) ? dx_ : 1.0;
-		prob_lo[d] = (d == 0) ? prob_lo_ : 0.0;
-		prob_hi[d] = (d == 0) ? prob_hi_ : 1.0;
-	}
-
-	return quokka::grid(array, box, dx, prob_lo, prob_hi, quokka::centering::cc, quokka::direction::x);
+	const amrex::Real num_cells = static_cast<amrex::Real>(boxArray(0).numPts());
+	error_norm_ = (num_cells > 0.0) ? (l1 / num_cells) : 0.0;
 }
 
 void AdvectionSimulationPrototype::step()

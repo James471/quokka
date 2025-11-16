@@ -35,3 +35,4 @@ build.targets = ["pyquokka"]
 [tool.scikit-build.cmake.define]
 QUOKKA_PYTHON = "ON"
 QUOKKA_BUILD_PYTHON_BINDINGS = "ON"
+AMReX_SPACEDIM = "3"

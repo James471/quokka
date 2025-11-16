@@ -1,3 +1,4 @@
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -5,14 +6,49 @@
 #include <utility>
 
 #include "AMReX.H"
+#include "Base/Array4.H"
 #include "experimental/DescriptorPrototype.hpp"
 #include "grid.hpp"
+#include "pyAMReX.H"
 
 namespace py = pybind11;
 using quokka::experimental::AdvectionSimulationPrototype;
 
 namespace
 {
+
+constexpr auto amrexPythonModuleName()
+{
+#if AMREX_SPACEDIM == 1
+	return "amrex.space1d";
+#elif AMREX_SPACEDIM == 2
+	return "amrex.space2d";
+#else
+	return "amrex.space3d";
+#endif
+}
+
+void ensureArray4Bindings(py::module_ &m)
+{
+	auto *type_info = py::detail::get_type_info(typeid(amrex::Array4<amrex::Real>));
+	if (type_info != nullptr) {
+		return;
+	}
+
+	try {
+		py::module_::import(amrexPythonModuleName());
+	} catch (py::error_already_set &) {
+		PyErr_Clear();
+	}
+
+	type_info = py::detail::get_type_info(typeid(amrex::Array4<amrex::Real>));
+	if (type_info != nullptr) {
+		return;
+	}
+
+	pyAMReX::make_Array4<amrex::Real>(m, "double");
+	pyAMReX::make_Array4<amrex::Real const>(m, "double_const");
+}
 
 auto makeGridObject(quokka::grid const &grid) -> py::object
 {
@@ -76,10 +112,14 @@ PYBIND11_MODULE(pyquokka, m)
 		}
 	});
 
+	ensureArray4Bindings(m);
+
 	py::class_<quokka::grid>(m, "Grid")
 	    .def_property_readonly("dx", [](quokka::grid const &grid) { return makeArray(grid.dx_); })
 	    .def_property_readonly("prob_lo", [](quokka::grid const &grid) { return makeArray(grid.prob_lo_); })
 	    .def_property_readonly("prob_hi", [](quokka::grid const &grid) { return makeArray(grid.prob_hi_); })
+	    .def_property_readonly("array4",
+				   [](quokka::grid const &grid) { return py::cast(grid.array_, py::return_value_policy::reference); })
 	    .def_property_readonly("i_range", [](quokka::grid const &grid) { return makeRangePair(grid.indexRange_, 0); })
 #if (AMREX_SPACEDIM >= 2)
 	    .def_property_readonly("j_range", [](quokka::grid const &grid) { return makeRangePair(grid.indexRange_, 1); })

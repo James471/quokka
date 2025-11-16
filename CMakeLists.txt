@@ -129,6 +129,9 @@ message(STATUS "AMReX git commit hash: ${AMREX_GIT_HASH}")
 add_subdirectory(${QuokkaCode_SOURCE_DIR}/extern/amrex ${QuokkaCode_BINARY_DIR}/amrex)
 add_subdirectory(${QuokkaCode_SOURCE_DIR}/extern/fmt ${QuokkaCode_BINARY_DIR}/fmt)
 add_subdirectory(${QuokkaCode_SOURCE_DIR}/extern/yaml-cpp ${QuokkaCode_BINARY_DIR}/yaml-cpp)
+if(QUOKKA_BUILD_PYTHON_BINDINGS)
+  include(${QuokkaCode_SOURCE_DIR}/cmake/dependencies/pyAMReX.cmake)
+endif()
 
 #add compiler definitions again because
 #they do not carry forward from Microphysics

@@ -7,6 +7,7 @@
 #include "AMReX_Box.H"
 #include "AMReX_Dim3.H"
 #include "AMReX_GpuQualifiers.H"
+#include "AMReX_MultiFab.H"
 #include "AMReX_TagBox.H"
 #include "AMReX_Vector.H"
 #include "grid.hpp"
@@ -125,6 +126,13 @@ class AMRSimulationPrototype : public amrex::AmrCore
 
       protected:
 	void setBaseGrid(int nx, amrex::Real prob_lo, amrex::Real prob_hi);
+	void applyInitializeHook(int lev, amrex::MultiFab &mf) const;
+	void applyExactSolutionHook(int lev, amrex::MultiFab &mf, amrex::Real time) const;
+	[[nodiscard]] auto cellData(int lev) -> amrex::MultiFab &;
+	[[nodiscard]] auto cellData(int lev) const -> amrex::MultiFab const &;
+	[[nodiscard]] auto scratchData(int lev) -> amrex::MultiFab &;
+	[[nodiscard]] auto scratchData(int lev) const -> amrex::MultiFab const &;
+	[[nodiscard]] auto gridIsConfigured() const -> bool { return grid_configured_; }
 
 	void ErrorEst(int lev, amrex::TagBoxArray &tags, amrex::Real time, int ngrow) override;
 	void MakeNewLevelFromScratch(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm) override;
@@ -132,9 +140,15 @@ class AMRSimulationPrototype : public amrex::AmrCore
 	void RemakeLevel(int lev, amrex::Real time, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm) override;
 	void ClearLevel(int lev) override;
 
+	void allocateLevelData(int lev, const amrex::BoxArray &ba, const amrex::DistributionMapping &dm);
+
 	PhysicsLayout layout_;
 	ProblemHooks hooks_;
 	amrex::Array<int, AMREX_SPACEDIM> periodicity_{AMREX_D_DECL(1, 0, 0)};
+	amrex::Vector<std::unique_ptr<amrex::MultiFab>> state_cc_;
+	amrex::Vector<std::unique_ptr<amrex::MultiFab>> scratch_cc_;
+	int nghost_cc_ = 1;
+	bool grid_configured_ = false;
 };
 
 class AdvectionSimulationPrototype : public AMRSimulationPrototype
@@ -167,16 +181,13 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype
 	[[nodiscard]] auto estimateMaxSignalSpeed() const -> amrex::Real;
 	[[nodiscard]] auto errorNorm() const -> amrex::Real { return error_norm_; }
 	[[nodiscard]] auto currentTime() const -> amrex::Real { return time_; }
-	[[nodiscard]] auto state() const -> amrex::Vector<amrex::Real> const & { return state_; }
-	[[nodiscard]] auto numCells() const -> int { return nx_; }
 	[[nodiscard]] auto probLo() const -> amrex::Real { return prob_lo_; }
 	[[nodiscard]] auto probHi() const -> amrex::Real { return prob_hi_; }
 	[[nodiscard]] auto dx() const -> amrex::Real { return dx_; }
 
       private:
 	void advance(amrex::Real dt);
-		void computeError();
-	[[nodiscard]] auto buildGridView(amrex::Vector<amrex::Real> &storage) -> quokka::grid;
+	void computeError();
 
 	amrex::GpuArray<amrex::Real, 3> velocity_{0., 0., 0.};
 	int nx_ = 0;
@@ -190,9 +201,6 @@ class AdvectionSimulationPrototype : public AMRSimulationPrototype
 	amrex::Real time_ = 0.;
 
 	bool state_initialized_ = false;
-
-	amrex::Vector<amrex::Real> state_;
-	amrex::Vector<amrex::Real> scratch_;
 
 	amrex::Real error_norm_ = 0.;
 };

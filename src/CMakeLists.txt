@@ -168,8 +168,16 @@ if(QUOKKA_BUILD_PYTHON_BINDINGS)
   pybind11_add_module(pyquokka MODULE
     bindings/pyquokka.cpp
     experimental/DescriptorPrototype.cpp)
-  target_include_directories(pyquokka PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  set(_pyamrex_include_dir "${Quokka_pyAMReX_SOURCE_DIR}")
+  if(NOT _pyamrex_include_dir)
+    set(_pyamrex_include_dir "${CMAKE_SOURCE_DIR}/extern/pyamrex")
+  endif()
+  target_include_directories(pyquokka PRIVATE ${CMAKE_SOURCE_DIR}/src ${_pyamrex_include_dir}/src)
   target_link_libraries(pyquokka PRIVATE AMReX::amrex fmt::fmt hdf5::hdf5 yaml-cpp::yaml-cpp)
+  set(pyAMReX_dim_target pyAMReX_${AMReX_SPACEDIM}d)
+  if(TARGET ${pyAMReX_dim_target})
+    add_dependencies(pyquokka ${pyAMReX_dim_target})
+  endif()
   # scikit-build only copies targets that participate in the "install" step.
   install(TARGETS pyquokka DESTINATION .)
 endif()

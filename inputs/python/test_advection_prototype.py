@@ -13,11 +13,12 @@ def sawtooth(x: float, prob_lo: float, prob_hi: float) -> float:
     length = prob_hi - prob_lo
     shifted = math.fmod(x - prob_lo + length, length)
     return math.fmod(shifted + 0.5 * length, length)
-  
+
 def exact_func(grid: pyquokka.Grid, time: float) -> None:
     dx = grid.dx[0]
     ilo, ihi = grid.i_range
     length = prob_hi - prob_lo
+    state = grid.array4
     for i in range(ilo, ihi + 1):
         x = prob_lo + (float(i) + 0.5) * dx
         x0 = x - velocity * time
@@ -25,7 +26,7 @@ def exact_func(grid: pyquokka.Grid, time: float) -> None:
             x0 += length
         while x0 >= prob_hi:
             x0 -= length
-        grid.set_state(i, sawtooth(x0, prob_lo, prob_hi))
+        state[i, 0, 0, 0] = sawtooth(x0, prob_lo, prob_hi)
 
 def init_func(grid: pyquokka.Grid) -> None:
     exact_func(grid, 0.0)
