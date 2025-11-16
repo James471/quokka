@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "AMReX.H"
+#include "AMReX_Geometry.H"
 #include "Base/Array4.H"
 #include "experimental/DescriptorPrototype.hpp"
 #include "grid.hpp"
@@ -93,6 +94,23 @@ auto makeDiagnosticsHook(py::function func)
 	};
 }
 
+void registerMultiFabExtensions()
+{
+	auto amrex_module = py::module_::import(amrexPythonModuleName());
+	auto ext_module = py::module_::import("pyquokka_py.extensions.multifab");
+	auto register_func = ext_module.attr("register_multifab_extension");
+	register_func(amrex_module);
+}
+
+auto makePyTuple(amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> const &values) -> py::tuple
+{
+	py::tuple result(AMREX_SPACEDIM);
+	for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+		result[d] = py::float_(values[d]);
+	}
+	return result;
+}
+
 } // namespace
 
 PYBIND11_MODULE(pyquokka, m)
@@ -113,6 +131,7 @@ PYBIND11_MODULE(pyquokka, m)
 	});
 
 	ensureArray4Bindings(m);
+	registerMultiFabExtensions();
 
 	py::class_<quokka::grid>(m, "Grid")
 	    .def_property_readonly("dx", [](quokka::grid const &grid) { return makeArray(grid.dx_); })
@@ -167,6 +186,15 @@ PYBIND11_MODULE(pyquokka, m)
 	    .def("current_time", &AdvectionSimulationPrototype::currentTime)
 	    .def(
 		"state",
-		[](AdvectionSimulationPrototype &sim, int level) -> amrex::MultiFab & { return sim.state(level); }, py::arg("level") = 0,
-		py::return_value_policy::reference_internal);
+		[](AdvectionSimulationPrototype &sim, int level) -> py::object {
+			amrex::MultiFab &mf = sim.state(level);
+			py::object mf_obj = py::cast(&mf, py::return_value_policy::reference_internal);
+			const auto &geom = sim.Geom(level);
+			mf_obj.attr("_quokka_level") = level;
+			mf_obj.attr("_quokka_prob_lo") = makePyTuple(geom.ProbLoArray());
+			mf_obj.attr("_quokka_prob_hi") = makePyTuple(geom.ProbHiArray());
+			mf_obj.attr("_quokka_dx") = makePyTuple(geom.CellSizeArray());
+			return mf_obj;
+		},
+		py::arg("level") = 0, py::return_value_policy::reference_internal);
 }

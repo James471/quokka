@@ -180,6 +180,7 @@ if(QUOKKA_BUILD_PYTHON_BINDINGS)
   endif()
   # scikit-build only copies targets that participate in the "install" step.
   install(TARGETS pyquokka DESTINATION .)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/python/ DESTINATION .)
   if(CMAKE_PYTHON_OUTPUT_DIRECTORY)
     install(DIRECTORY ${CMAKE_PYTHON_OUTPUT_DIRECTORY}/amrex DESTINATION .)
   endif()
