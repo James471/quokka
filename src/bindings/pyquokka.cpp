@@ -186,9 +186,10 @@ PYBIND11_MODULE(pyquokka, m)
 	    .def("current_time", &AdvectionSimulationPrototype::currentTime)
 	    .def(
 		"state",
-		[](AdvectionSimulationPrototype &sim, int level) -> py::object {
+		[](py::object self, int level) -> py::object {
+			auto &sim = self.cast<AdvectionSimulationPrototype &>();
 			amrex::MultiFab &mf = sim.state(level);
-			py::object mf_obj = py::cast(&mf, py::return_value_policy::reference_internal);
+			py::object mf_obj = py::cast(&mf, py::return_value_policy::reference, self);
 			const auto &geom = sim.Geom(level);
 			mf_obj.attr("_quokka_level") = level;
 			mf_obj.attr("_quokka_prob_lo") = makePyTuple(geom.ProbLoArray());
@@ -196,5 +197,7 @@ PYBIND11_MODULE(pyquokka, m)
 			mf_obj.attr("_quokka_dx") = makePyTuple(geom.CellSizeArray());
 			return mf_obj;
 		},
-		py::arg("level") = 0, py::return_value_policy::reference_internal);
+		py::arg("level") = 0,
+		py::return_value_policy::reference,
+		py::keep_alive<0, 1>());
 }

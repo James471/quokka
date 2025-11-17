@@ -1,0 +1,5 @@
+numpy>=1.23
+scikit-build-core>=0.9.0
+pybind11>=2.11.0
+cmake>=3.26
+ninja>=1.11

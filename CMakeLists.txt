@@ -140,3 +140,67 @@ endif()
 add_definitions(-DNAUX_NET -DSTRANG)
 add_subdirectory(${QuokkaCode_SOURCE_DIR}/extern/Microphysics ${QuokkaCode_BINARY_DIR}/Microphysics)
 add_subdirectory(${QuokkaCode_SOURCE_DIR}/src ${QuokkaCode_BINARY_DIR}/src)
+
+if(QUOKKA_BUILD_PYTHON_BINDINGS)
+  if(NOT DEFINED Python_EXECUTABLE OR Python_EXECUTABLE STREQUAL "")
+    find_package(Python COMPONENTS Interpreter REQUIRED)
+  endif()
+  set(PY_PIP_OPTIONS "-v" CACHE STRING
+      "Additional parameters to pass to `pip` as ; separated list")
+  set(PY_PIP_INSTALL_OPTIONS "" CACHE STRING
+      "Additional parameters to pass to `pip install` as ; separated list")
+
+  if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(_Quokka_CUSTOM_TARGET_PREFIX_DEFAULT "")
+  else()
+    set(_Quokka_CUSTOM_TARGET_PREFIX_DEFAULT "quokka_")
+  endif()
+  set(Quokka_CUSTOM_TARGET_PREFIX "${_Quokka_CUSTOM_TARGET_PREFIX_DEFAULT}"
+      CACHE STRING "Prefix for custom targets")
+
+  add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_wheel
+      ${CMAKE_COMMAND} -E rm -f -r quokka-whl
+      COMMAND
+          ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} wheel --no-build-isolation --no-deps --wheel-dir=quokka-whl "${QuokkaCode_SOURCE_DIR}"
+      COMMAND_EXPAND_LISTS VERBATIM
+      WORKING_DIRECTORY
+          ${QuokkaCode_BINARY_DIR}
+      DEPENDS
+          pyquokka
+          ${Quokka_CUSTOM_TARGET_PREFIX}pip_install_requirements
+  )
+
+  add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_install_requirements
+      ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} install --break-system-packages ${PY_PIP_INSTALL_OPTIONS} -r "${QuokkaCode_SOURCE_DIR}/python/requirements.txt"
+      COMMAND_EXPAND_LISTS VERBATIM
+      WORKING_DIRECTORY
+          ${QuokkaCode_BINARY_DIR}
+  )
+
+  set(_EXTRA_INSTALL_DEPENDS)
+  if(TARGET pyamrex_pip_install)
+      set(_EXTRA_INSTALL_DEPENDS pyamrex_pip_install)
+  endif()
+
+  add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_install
+      ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
+      COMMAND_EXPAND_LISTS VERBATIM
+      WORKING_DIRECTORY
+          ${QuokkaCode_BINARY_DIR}
+      DEPENDS
+          pyquokka
+          ${Quokka_CUSTOM_TARGET_PREFIX}pip_wheel
+          ${Quokka_CUSTOM_TARGET_PREFIX}pip_install_requirements
+          ${_EXTRA_INSTALL_DEPENDS}
+  )
+
+  add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_install_nodeps
+      ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
+      COMMAND_EXPAND_LISTS VERBATIM
+      WORKING_DIRECTORY
+          ${QuokkaCode_BINARY_DIR}
+      DEPENDS
+          pyquokka
+          ${Quokka_CUSTOM_TARGET_PREFIX}pip_wheel
+  )
+endif()
