@@ -38,16 +38,3 @@ build.targets = ["pyquokka"]
 QUOKKA_PYTHON = "ON"
 QUOKKA_BUILD_PYTHON_BINDINGS = "ON"
 AMReX_SPACEDIM = "3"
-
-[tool.pixi.workspace]
-channels = ["conda-forge"]
-platforms = ["osx-arm64"]
-
-[tool.pixi.pypi-dependencies]
-pyquokka = { path = ".", editable = true }
-
-[tool.pixi.environments]
-default = { solve-group = "default" }
-dev = { features = ["dev"], solve-group = "default" }
-
-[tool.pixi.tasks]
