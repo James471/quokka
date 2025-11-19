@@ -114,7 +114,21 @@ auto makePyTuple(amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> const &values) -> 
 
 PYBIND11_MODULE(pyquokka, m)
 {
-	m.def("initialize", []() {
+	auto importPyAmrexModule = []() { return py::module_::import(amrexPythonModuleName()); };
+	auto ensurePyAmrexInitialized = [importPyAmrexModule]() {
+		auto amrex_module = importPyAmrexModule();
+		bool already_initialized = false;
+		if (py::hasattr(amrex_module, "_pyquokka_initialized")) {
+			already_initialized = amrex_module.attr("_pyquokka_initialized").cast<bool>();
+		}
+		if (!already_initialized) {
+			amrex_module.attr("initialize")(py::list{});
+			amrex_module.attr("_pyquokka_initialized") = py::bool_(true);
+		}
+		return amrex_module;
+	};
+
+	m.def("initialize", [ensurePyAmrexInitialized]() {
 		if (!amrex::Initialized()) {
 			int argc = 1;
 			char arg0[] = "pyquokka";
@@ -122,15 +136,21 @@ PYBIND11_MODULE(pyquokka, m)
 			char **argv_ptr = argv;
 			amrex::Initialize(argc, argv_ptr);
 		}
+		ensurePyAmrexInitialized();
 	});
-	m.def("finalize", []() {
+	m.def("finalize", [importPyAmrexModule]() {
+		auto amrex_module = importPyAmrexModule();
+		if (py::hasattr(amrex_module, "_pyquokka_initialized") && amrex_module.attr("_pyquokka_initialized").cast<bool>()) {
+			amrex_module.attr("finalize")();
+			amrex_module.attr("_pyquokka_initialized") = py::bool_(false);
+		}
 		if (amrex::Initialized()) {
 			amrex::Finalize();
 		}
 	});
 
 	ensureArray4Bindings(m);
-	auto amrex_module = py::module_::import(amrexPythonModuleName());
+	auto amrex_module = importPyAmrexModule();
 	m.attr("amr") = amrex_module;
 	registerMultiFabExtensions(amrex_module);
 
