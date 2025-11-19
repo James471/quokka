@@ -178,13 +178,20 @@ if(QUOKKA_BUILD_PYTHON_BINDINGS)
           ${QuokkaCode_BINARY_DIR}
   )
 
+  find_program(Quokka_UV_EXECUTABLE uv)
+  if(Quokka_UV_EXECUTABLE)
+      set(_Quokka_PIP_INSTALL_COMMAND ${Quokka_UV_EXECUTABLE} pip)
+  else()
+      set(_Quokka_PIP_INSTALL_COMMAND ${Python_EXECUTABLE} -m pip)
+  endif()
+
   set(_EXTRA_INSTALL_DEPENDS)
   if(TARGET pyamrex_pip_install)
       set(_EXTRA_INSTALL_DEPENDS pyamrex_pip_install)
   endif()
 
   add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_install
-      ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
+      ${_Quokka_PIP_INSTALL_COMMAND} ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
       COMMAND_EXPAND_LISTS VERBATIM
       WORKING_DIRECTORY
           ${QuokkaCode_BINARY_DIR}
@@ -196,7 +203,7 @@ if(QUOKKA_BUILD_PYTHON_BINDINGS)
   )
 
   add_custom_target(${Quokka_CUSTOM_TARGET_PREFIX}pip_install_nodeps
-      ${Python_EXECUTABLE} -m pip ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
+      ${_Quokka_PIP_INSTALL_COMMAND} ${PY_PIP_OPTIONS} install --force-reinstall --no-index --no-deps --break-system-packages ${PY_PIP_INSTALL_OPTIONS} --find-links=quokka-whl pyquokka
       COMMAND_EXPAND_LISTS VERBATIM
       WORKING_DIRECTORY
           ${QuokkaCode_BINARY_DIR}

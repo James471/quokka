@@ -94,9 +94,8 @@ auto makeDiagnosticsHook(py::function func)
 	};
 }
 
-void registerMultiFabExtensions()
+void registerMultiFabExtensions(py::module_ const &amrex_module)
 {
-	auto amrex_module = py::module_::import(amrexPythonModuleName());
 	auto ext_module = py::module_::import("pyquokka_py.extensions.multifab");
 	auto register_func = ext_module.attr("register_multifab_extension");
 	register_func(amrex_module);
@@ -131,7 +130,9 @@ PYBIND11_MODULE(pyquokka, m)
 	});
 
 	ensureArray4Bindings(m);
-	registerMultiFabExtensions();
+	auto amrex_module = py::module_::import(amrexPythonModuleName());
+	m.attr("amr") = amrex_module;
+	registerMultiFabExtensions(amrex_module);
 
 	py::class_<quokka::grid>(m, "Grid")
 	    .def_property_readonly("dx", [](quokka::grid const &grid) { return makeArray(grid.dx_); })
