@@ -36,7 +36,7 @@ def diagnostics(sim: pyquokka.AdvectionSimulation) -> None:
     err = sim.error_norm()
     mf = sim.state()
     ncomp = mf.n_comp
-    max_val = mf.max() # segfault happens here...
+    max_val = mf.max()
     print(f"Prototype time = {time}, L1(error) = {err}, ncomp(state) = {ncomp}, max(state) = {max_val}")
 
 def main() -> int:
