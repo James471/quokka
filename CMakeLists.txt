@@ -14,8 +14,19 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/extern/a
 add_compile_definitions(PYBIND11_DETAILED_ERROR_MESSAGES)
 include(CTest)
 
+## a Python installation can be specified with Python_ROOT_DIR
+##   see: https://cmake.org/cmake/help/latest/module/FindPython.html#hints
+## NumPy and Matplotlib can be installed with `python3 -m pip install numpy matplotlib --user`
+option(QUOKKA_PYTHON "Compile with Python support (on/off)" ON)
+option(QUOKKA_BUILD_PYTHON_BINDINGS "Build the pyquokka Python module" OFF)
+
 set(AMReX_SPACEDIM 1 CACHE STRING "")
-set(AMReX_MPI ON CACHE BOOL "" FORCE)
+# Disable MPI for Python bindings builds (MPI is not needed and complicates the build)
+if(QUOKKA_BUILD_PYTHON_BINDINGS)
+  set(AMReX_MPI OFF CACHE BOOL "" FORCE)
+else()
+  set(AMReX_MPI ON CACHE BOOL "" FORCE)
+endif()
 set(AMReX_HDF5 OFF CACHE BOOL "" FORCE) # do not use
 set(AMReX_LINEAR_SOLVERS ON CACHE BOOL "" FORCE)
 set(AMReX_LINEAR_SOLVERS_INCFLO OFF CACHE BOOL "" FORCE)
@@ -25,12 +36,6 @@ set(AMReX_ASCENT OFF CACHE BOOL "") # optional
 set(AMReX_AMRLEVEL OFF CACHE BOOL "" FORCE)
 set(AMReX_PROBINIT OFF CACHE BOOL "" FORCE)
 set(AMReX_TINY_PROFILE ON CACHE BOOL "" FORCE)
-
-## a Python installation can be specified with Python_ROOT_DIR
-##   see: https://cmake.org/cmake/help/latest/module/FindPython.html#hints
-## NumPy and Matplotlib can be installed with `python3 -m pip install numpy matplotlib --user`
-option(QUOKKA_PYTHON "Compile with Python support (on/off)" ON)
-option(QUOKKA_BUILD_PYTHON_BINDINGS "Build the pyquokka Python module" OFF)
 option(DISABLE_FMAD "Disable fused multiply-add instructions on GPU (on/off)" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_HWASAN "Enable HWAddressSanitizer" OFF)
