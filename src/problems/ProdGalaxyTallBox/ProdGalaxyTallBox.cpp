@@ -110,7 +110,7 @@ static constexpr amrex::Real rho01 = 2.78556e-24;
 static constexpr amrex::Real rho02 = 2.7855600000000006e-29;
 
 template <> struct Particle_Traits<TheProblem> {
-	static constexpr ParticleSwitch particle_switch = ParticleSwitch::StochasticStellarPop;
+	static constexpr ParticleSwitch particle_switch = ParticleSwitch::Sink;
 };
 
 template <> struct HydroSystem_Traits<TheProblem> {
@@ -175,6 +175,39 @@ AMREX_GPU_HOST_DEVICE auto RadSystem<TheProblem>::DefinePhotoelectricHeatingE1De
 	const double ref_J_ISR = 5.29e-14; // reference value for the ISR in erg cm^3
 	const double coeff = 1.33e-24;
 	return coeff * epsilon * num_density / ref_J_ISR; // s^-1
+}
+
+template <> void QuokkaSimulation<TheProblem>::refineGrid(int lev, amrex::TagBoxArray &tags, amrex::Real /*time*/, int /*ngrow*/)
+{
+	// read-in jeans length refinement runtime params
+	amrex::ParmParse const pp("jeansRefine");
+	int N_cells = 0;
+	pp.query("ncells", N_cells); // inverse of the 'Jeans number' [Truelove et al. (1997)]
+
+	const amrex::Real G = Gconst_;
+	const amrex::Real dx = geom[lev].CellSizeArray()[0];
+
+	for (amrex::MFIter mfi(state_new_cc_[lev]); mfi.isValid(); ++mfi) {
+		const amrex::Box &box = mfi.validbox();
+		const auto state = state_new_cc_[lev].const_array(mfi);
+		const auto tag = tags.array(mfi);
+		const int nidx = HydroSystem<TheProblem>::density_index;
+
+		amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+			Real const rho = state(i, j, k, nidx);
+			Real const pressure = HydroSystem<TheProblem>::ComputePressure(state, i, j, k);
+			amrex::GpuArray<Real, Physics_Traits<TheProblem>::numMassScalars> massScalars = RadSystem<TheProblem>::ComputeMassScalars(state, i, j, k);
+
+			amrex::Real const cs = quokka::EOS<TheProblem>::ComputeSoundSpeed(rho, pressure, massScalars);
+
+			const amrex::Real l_Jeans = cs * std::sqrt(M_PI / (G * rho));
+			// add a density criterion for refinement so that no initial refinement is ever triggered outside the core
+			// typically, a density threshold ~ initial core density works well
+			if (l_Jeans < (N_cells * dx)) {
+				tag(i, j, k) = amrex::TagBox::SET;
+			}
+		});
+	}
 }
 
 template <> void QuokkaSimulation<TheProblem>::createInitialStochasticStellarPopParticles()

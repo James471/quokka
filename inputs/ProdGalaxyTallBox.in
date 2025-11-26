@@ -58,6 +58,8 @@ perturb.filename = "../inputs/zdrv.hdf5"
 #perturb.use_superresolution = 0
 perturb.amplitude = 7e5 # 7 km/s
 
+jeansRefine.ncells = 10 #refine on these many cells per jeans length
+
 tiny_profiler.enabled = 0
 
 statistics_interval = 128
